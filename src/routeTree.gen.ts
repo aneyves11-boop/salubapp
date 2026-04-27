@@ -9,11 +9,17 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TestSmsRouteImport } from './routes/test-sms'
 import { Route as SignalerRouteImport } from './routes/signaler'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TestSmsRoute = TestSmsRouteImport.update({
+  id: '/test-sms',
+  path: '/test-sms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignalerRoute = SignalerRouteImport.update({
   id: '/signaler',
   path: '/signaler',
@@ -40,12 +46,14 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
+  '/test-sms': typeof TestSmsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
+  '/test-sms': typeof TestSmsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,14 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
+  '/test-sms': typeof TestSmsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/login' | '/signaler'
+  fullPaths: '/' | '/dashboard' | '/login' | '/signaler' | '/test-sms'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/login' | '/signaler'
-  id: '__root__' | '/' | '/dashboard' | '/login' | '/signaler'
+  to: '/' | '/dashboard' | '/login' | '/signaler' | '/test-sms'
+  id: '__root__' | '/' | '/dashboard' | '/login' | '/signaler' | '/test-sms'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,10 +76,18 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
   SignalerRoute: typeof SignalerRoute
+  TestSmsRoute: typeof TestSmsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/test-sms': {
+      id: '/test-sms'
+      path: '/test-sms'
+      fullPath: '/test-sms'
+      preLoaderRoute: typeof TestSmsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/signaler': {
       id: '/signaler'
       path: '/signaler'
@@ -107,6 +124,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
   SignalerRoute: SignalerRoute,
+  TestSmsRoute: TestSmsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

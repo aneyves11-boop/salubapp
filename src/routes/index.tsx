@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
-import { PlusCircle, Loader2, Megaphone } from "lucide-react";
+import { PlusCircle, Loader2, Megaphone, Flame } from "lucide-react";
 
 const ReportsMap = lazy(() => import("@/components/ReportsMap").then((m) => ({ default: m.ReportsMap })));
 
@@ -66,6 +66,9 @@ function HomePage() {
                   <Link to={user ? "/signaler" : "/login"}>
                     <PlusCircle className="h-5 w-5" /> Signaler maintenant
                   </Link>
+                </Button>
+                <Button asChild variant="outline" size="lg" className="gap-1 border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                  <Link to="/carte"><Flame className="h-5 w-5" /> Voir la carte thermique</Link>
                 </Button>
               </div>
             </div>

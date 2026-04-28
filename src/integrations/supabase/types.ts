@@ -14,6 +14,38 @@ export type Database = {
   }
   public: {
     Tables: {
+      report_verifications: {
+        Row: {
+          created_at: string
+          id: string
+          is_true: boolean
+          report_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_true: boolean
+          report_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_true?: boolean
+          report_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_verifications_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_votes: {
         Row: {
           created_at: string
@@ -48,13 +80,16 @@ export type Database = {
           category: Database["public"]["Enums"]["report_category"]
           created_at: string
           description: string
+          false_count: number
           id: string
           latitude: number
           longitude: number
           photo_url: string | null
           status: Database["public"]["Enums"]["report_status"]
+          true_count: number
           updated_at: string
           user_id: string
+          verified_status: Database["public"]["Enums"]["verification_status"]
           ville: string | null
           votes_count: number
         }
@@ -62,13 +97,16 @@ export type Database = {
           category: Database["public"]["Enums"]["report_category"]
           created_at?: string
           description: string
+          false_count?: number
           id?: string
           latitude: number
           longitude: number
           photo_url?: string | null
           status?: Database["public"]["Enums"]["report_status"]
+          true_count?: number
           updated_at?: string
           user_id: string
+          verified_status?: Database["public"]["Enums"]["verification_status"]
           ville?: string | null
           votes_count?: number
         }
@@ -76,13 +114,16 @@ export type Database = {
           category?: Database["public"]["Enums"]["report_category"]
           created_at?: string
           description?: string
+          false_count?: number
           id?: string
           latitude?: number
           longitude?: number
           photo_url?: string | null
           status?: Database["public"]["Enums"]["report_status"]
+          true_count?: number
           updated_at?: string
           user_id?: string
+          verified_status?: Database["public"]["Enums"]["verification_status"]
           ville?: string | null
           votes_count?: number
         }
@@ -132,6 +173,7 @@ export type Database = {
         | "eau_stagnante"
         | "autre"
       report_status: "nouveau" | "en_cours" | "resolu" | "rejete"
+      verification_status: "en_attente" | "valide" | "rejete" | "douteux"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -269,6 +311,7 @@ export const Constants = {
         "autre",
       ],
       report_status: ["nouveau", "en_cours", "resolu", "rejete"],
+      verification_status: ["en_attente", "valide", "rejete", "douteux"],
     },
   },
 } as const

@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
-import { LogOut, MapPin, PlusCircle, ShieldCheck } from "lucide-react";
+import { LogOut, MapPin, PlusCircle, ShieldCheck, Flame } from "lucide-react";
 
 export function AppHeader() {
   const { user, isAutorite, signOut } = useAuth();
@@ -20,6 +20,9 @@ export function AppHeader() {
           </div>
         </Link>
         <nav className="flex items-center gap-1">
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/carte"><Flame className="mr-1 h-4 w-4" />Carte</Link>
+          </Button>
           {isAutorite && (
             <Button asChild variant="ghost" size="sm">
               <Link to="/dashboard"><ShieldCheck className="mr-1 h-4 w-4" />Tableau de bord</Link>

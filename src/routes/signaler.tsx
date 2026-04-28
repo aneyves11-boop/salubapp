@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { toast } from "sonner";
-import { Camera, MapPin, Loader2, CheckCircle2 } from "lucide-react";
+import { Camera, MapPin, Loader2, CheckCircle2, Sparkles } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 export const Route = createFileRoute("/signaler")({
   head: () => ({ meta: [{ title: "Nouveau signalement — SalubApp" }] }),
@@ -28,6 +29,8 @@ function SignalerPage() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoState, setGeoState] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [submitting, setSubmitting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<{ category: Category; confidence: number } | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/login" });
@@ -49,6 +52,41 @@ function SignalerPage() {
     setPhoto(file);
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoPreview(file ? URL.createObjectURL(file) : null);
+    setAiSuggestion(null);
+    if (file) void analyzePhoto(file);
+  };
+
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1] ?? "");
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const analyzePhoto = async (file: File) => {
+    setAnalyzing(true);
+    try {
+      const imageBase64 = await fileToBase64(file);
+      const { data, error } = await supabase.functions.invoke("classify-image", {
+        body: { imageBase64, mimeType: file.type || "image/jpeg" },
+      });
+      if (error) throw error;
+      const result = data as { category: Category; description: string; confidence: number; error?: string };
+      if (result.error) throw new Error(result.error);
+      setAiSuggestion({ category: result.category, confidence: result.confidence });
+      // Pré-remplit catégorie si vide, et description si vide
+      setCategory((prev) => prev ?? result.category);
+      setDescription((prev) => (prev.trim().length === 0 ? result.description : prev));
+      toast.success("Analyse IA terminée", { description: "Vérifiez et ajustez si besoin." });
+    } catch (e) {
+      toast.error("Analyse IA impossible", { description: (e as Error).message });
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   const submit = async () => {
@@ -100,6 +138,14 @@ function SignalerPage() {
         <div className="space-y-5">
           <Card className="p-4">
             <Label className="mb-3 block">Type de problème</Label>
+            {aiSuggestion && (
+              <div className="mb-3 flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-xs">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span className="text-muted-foreground">Suggestion IA :</span>
+                <Badge variant="secondary">{CATEGORIES.find((c) => c.value === aiSuggestion.category)?.label}</Badge>
+                <span className="ml-auto text-muted-foreground">{Math.round(aiSuggestion.confidence * 100)}% sûr</span>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               {CATEGORIES.map((c) => (
                 <button key={c.value} type="button" onClick={() => setCategory(c.value)}
@@ -138,6 +184,21 @@ function SignalerPage() {
             </label>
             {photoPreview && (
               <img src={photoPreview} alt="Aperçu" className="mt-3 max-h-60 w-full rounded-lg object-cover" />
+            )}
+            {photo && (
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {analyzing
+                    ? "Analyse de la photo par IA en cours…"
+                    : aiSuggestion
+                    ? "✨ Photo analysée — la catégorie a été pré-remplie."
+                    : "L'IA peut classer automatiquement votre photo."}
+                </p>
+                <Button type="button" variant="outline" size="sm" disabled={analyzing} onClick={() => photo && analyzePhoto(photo)} className="gap-1">
+                  {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {analyzing ? "Analyse…" : aiSuggestion ? "Re-analyser" : "Analyser avec l'IA"}
+                </Button>
+              </div>
             )}
           </Card>
 

@@ -10,8 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { toast } from "sonner";
-import { Camera, MapPin, Loader2, CheckCircle2, Sparkles } from "lucide-react";
+import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { blurFacesInImage } from "@/lib/face-blur";
 
 export const Route = createFileRoute("/signaler")({
   head: () => ({ meta: [{ title: "Nouveau signalement — SalubApp" }] }),
@@ -31,6 +32,8 @@ function SignalerPage() {
   const [submitting, setSubmitting] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<{ category: Category; confidence: number } | null>(null);
+  const [blurring, setBlurring] = useState(false);
+  const [facesBlurred, setFacesBlurred] = useState<number | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/login" });
@@ -48,12 +51,29 @@ function SignalerPage() {
 
   useEffect(() => { askLocation(); /* eslint-disable-next-line */ }, []);
 
-  const handlePhoto = (file: File | null) => {
-    setPhoto(file);
+  const handlePhoto = async (file: File | null) => {
     if (photoPreview) URL.revokeObjectURL(photoPreview);
-    setPhotoPreview(file ? URL.createObjectURL(file) : null);
     setAiSuggestion(null);
-    if (file) void analyzePhoto(file);
+    setFacesBlurred(null);
+    if (!file) { setPhoto(null); setPhotoPreview(null); return; }
+    setBlurring(true);
+    try {
+      const { blob, facesDetected } = await blurFacesInImage(file);
+      const safeFile = new File([blob], file.name.replace(/\.\w+$/, "") + "-anon.jpg", { type: "image/jpeg" });
+      setPhoto(safeFile);
+      setPhotoPreview(URL.createObjectURL(safeFile));
+      setFacesBlurred(facesDetected);
+      if (facesDetected > 0) {
+        toast.success(`${facesDetected} visage${facesDetected > 1 ? "s" : ""} flouté${facesDetected > 1 ? "s" : ""} pour préserver la vie privée.`);
+      }
+      void analyzePhoto(safeFile);
+    } catch (e) {
+      toast.error("Traitement de l'image impossible", { description: (e as Error).message });
+      setPhoto(file);
+      setPhotoPreview(URL.createObjectURL(file));
+    } finally {
+      setBlurring(false);
+    }
   };
 
   const fileToBase64 = (file: File): Promise<string> =>
@@ -182,6 +202,19 @@ function SignalerPage() {
               <input type="file" accept="image/*" capture="environment" className="hidden"
                 onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)} />
             </label>
+            <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+              <ShieldCheck className="h-3 w-3" /> Les visages sont automatiquement floutés sur votre appareil avant l'envoi.
+            </p>
+            {blurring && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyse de confidentialité…
+              </div>
+            )}
+            {facesBlurred !== null && !blurring && (
+              <div className="mt-2 text-xs text-emerald-700">
+                ✓ {facesBlurred === 0 ? "Aucun visage détecté." : `${facesBlurred} visage(s) flouté(s).`}
+              </div>
+            )}
             {photoPreview && (
               <img src={photoPreview} alt="Aperçu" className="mt-3 max-h-60 w-full rounded-lg object-cover" />
             )}

@@ -85,7 +85,7 @@ function HomePage() {
             <SelectContent>
               <SelectItem value="all">Toutes les catégories</SelectItem>
               {CATEGORIES.map((c) => (
-                <SelectItem key={c.value} value={c.value}>{c.emoji} {c.label}</SelectItem>
+                <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -93,8 +93,8 @@ function HomePage() {
 
         <Tabs defaultValue="liste">
           <TabsList className="mb-4">
-            <TabsTrigger value="liste">📋 Liste</TabsTrigger>
-            <TabsTrigger value="carte">🗺️ Carte</TabsTrigger>
+            <TabsTrigger value="liste">Liste</TabsTrigger>
+            <TabsTrigger value="carte">Carte</TabsTrigger>
           </TabsList>
 
           <TabsContent value="liste">

@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CATEGORIES, STATUSES, categoryEmoji, categoryLabel, statusInfo, type Status } from "@/lib/categories";
+import { CATEGORIES, STATUSES, categoryLabel, statusInfo, type Status } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
 import { Download, Loader2, ShieldCheck, ThumbsUp, MapPin } from "lucide-react";
 import { toast } from "sonner";
@@ -132,7 +132,6 @@ function DashboardPage() {
                 {r.photo_url && <img src={r.photo_url} alt="" className="h-24 w-24 shrink-0 rounded-lg object-cover" />}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xl">{categoryEmoji(r.category)}</span>
                     <span className="font-semibold">{categoryLabel(r.category)}</span>
                     <Badge className={statusInfo(r.status).color}>{statusInfo(r.status).label}</Badge>
                     <span className="ml-auto text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString("fr-FR")}</span>

@@ -5,7 +5,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CATEGORIES, categoryEmoji, categoryLabel, type Category } from "@/lib/categories";
+import { CATEGORIES, categoryLabel, type Category } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
 import { Loader2, Flame, MapPin, TrendingUp, Filter } from "lucide-react";
 
@@ -146,7 +146,7 @@ function PublicDashboard() {
                       onClick={() => toggle(c.value)}
                       className={`rounded-full border px-3 py-1.5 text-xs transition ${on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
                     >
-                      {c.emoji} {c.label}
+                      {c.label}
                     </button>
                   );
                 })}
@@ -166,7 +166,7 @@ function PublicDashboard() {
                   return (
                     <div key={c.value}>
                       <div className="flex items-center justify-between text-xs">
-                        <span>{c.emoji} {c.label}</span>
+                        <span>{c.label}</span>
                         <span className="font-mono text-muted-foreground">{c.count}</span>
                       </div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">

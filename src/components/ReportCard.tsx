@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { categoryEmoji, categoryLabel, statusInfo } from "@/lib/categories";
+import { categoryLabel, statusInfo } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
 import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -76,7 +76,6 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
       <div className="space-y-2 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-2xl">{categoryEmoji(report.category)}</span>
             <div>
               <div className="text-sm font-semibold leading-tight">{categoryLabel(report.category)}</div>
               <div className="text-xs text-muted-foreground">{created.toLocaleDateString("fr-FR")}</div>

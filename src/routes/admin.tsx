@@ -7,9 +7,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { categoryEmoji, categoryLabel } from "@/lib/categories";
+import { categoryLabel } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
-import { ShieldCheck, Loader2, CheckCircle2, XCircle, AlertTriangle, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
+import { ShieldCheck, Loader2, CheckCircle2, XCircle, AlertTriangle, ThumbsUp, ThumbsDown, Trash2, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
 type Report = Database["public"]["Tables"]["reports"]["Row"];
@@ -123,14 +123,13 @@ function AdminPage() {
                     {r.photo_url && <img src={r.photo_url} alt="" className="h-28 w-28 shrink-0 rounded-lg object-cover" />}
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xl">{categoryEmoji(r.category)}</span>
                         <span className="font-semibold">{categoryLabel(r.category)}</span>
                         <Badge className={v.color}><Icon className="mr-1 h-3 w-3" />{v.label}</Badge>
                         <span className="ml-auto text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString("fr-FR")}</span>
                       </div>
                       <p className="mt-2 text-sm">{r.description}</p>
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                        {r.ville && <span>📍 {r.ville}</span>}
+                        {r.ville && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{r.ville}</span>}
                         <span className="flex items-center gap-1 text-emerald-700"><ThumbsUp className="h-3 w-3" />{r.true_count} vrai</span>
                         <span className="flex items-center gap-1 text-red-700"><ThumbsDown className="h-3 w-3" />{r.false_count} faux</span>
                         <a className="underline" target="_blank" rel="noreferrer"

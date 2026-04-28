@@ -172,7 +172,6 @@ function SignalerPage() {
                   className={`flex flex-col items-start gap-1 rounded-lg border-2 p-3 text-left text-sm transition ${
                     category === c.value ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
                   }`}>
-                  <span className="text-2xl">{c.emoji}</span>
                   <span className="font-medium leading-tight">{c.label}</span>
                 </button>
               ))}
@@ -212,7 +211,7 @@ function SignalerPage() {
             )}
             {facesBlurred !== null && !blurring && (
               <div className="mt-2 text-xs text-emerald-700">
-                ✓ {facesBlurred === 0 ? "Aucun visage détecté." : `${facesBlurred} visage(s) flouté(s).`}
+                {facesBlurred === 0 ? "Aucun visage détecté." : `${facesBlurred} visage(s) flouté(s).`}
               </div>
             )}
             {photoPreview && (
@@ -224,7 +223,7 @@ function SignalerPage() {
                   {analyzing
                     ? "Analyse de la photo par IA en cours…"
                     : aiSuggestion
-                    ? "✨ Photo analysée — la catégorie a été pré-remplie."
+                    ? "Photo analysée — la catégorie a été pré-remplie."
                     : "L'IA peut classer automatiquement votre photo."}
                 </p>
                 <Button type="button" variant="outline" size="sm" disabled={analyzing} onClick={() => photo && analyzePhoto(photo)} className="gap-1">

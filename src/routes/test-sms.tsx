@@ -33,7 +33,7 @@ function interpret(errorMsg: string | null, errorCode: string | null): Result {
   if (!errorMsg && !errorCode) {
     return {
       status: "ok",
-      title: "Provider SMS configuré ✅",
+      title: "Provider SMS configuré",
       description: "Le code OTP a été envoyé avec succès. Vérifiez votre téléphone — vous pouvez maintenant utiliser /login normalement.",
     };
   }
@@ -107,7 +107,7 @@ function TestSmsPage() {
     if (error && /signups? not allowed/i.test(error.message)) {
       setResult({
         status: "ok",
-        title: "Provider SMS configuré ✅",
+        title: "Provider SMS configuré",
         description: "Le provider Phone répond correctement. (Aucun SMS envoyé pour ce diagnostic — l'utilisateur n'existe pas encore, ce qui est normal.) Vous pouvez aller sur /login pour vous inscrire.",
       });
       return;

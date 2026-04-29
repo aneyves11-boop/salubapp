@@ -10,11 +10,11 @@ export type Status = Database["public"]["Enums"]["report_status"];
 // - Réordonner : changez l'ordre des entrées du tableau.
 export const CATEGORIES: { value: Category; label: string }[] = [
   { value: "dechets", label: "Déchets / ordures" },
-  { value: "eaux_usees", label: "Eaux usées" },
+  { value: "eaux_usees", label: "Caniveaux ouverts / bouchés" },
   { value: "voirie", label: "Voirie / nids-de-poule" },
   { value: "marche", label: "Marché insalubre" },
-  { value: "eau_stagnante", label: "Eau stagnante / moustiques" },
-  { value: "autre", label: "Autre incivisme" },
+  { value: "eau_stagnante", label: "Eau stagnante" },
+  { value: "autre", label: "Autre" },
 ];
 
 export const STATUSES: { value: Status; label: string; color: string }[] = [

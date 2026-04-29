@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { categoryLabel, statusInfo } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
-import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from "lucide-react";
+import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 
@@ -19,14 +19,21 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
   const [busy, setBusy] = useState(false);
   const [verifBusy, setVerifBusy] = useState(false);
   const [myVerif, setMyVerif] = useState<boolean | null>(null);
+  const [myStatus, setMyStatus] = useState<boolean | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
   const status = statusInfo(report.status);
   const created = new Date(report.created_at);
 
   useEffect(() => {
-    if (!user) { setMyVerif(null); return; }
-    supabase.from("report_verifications").select("is_true")
-      .eq("report_id", report.id).eq("user_id", user.id).maybeSingle()
-      .then(({ data }) => setMyVerif(data?.is_true ?? null));
+    if (!user) { setMyVerif(null); setMyStatus(null); return; }
+    supabase.from("report_verifications").select("is_true, kind")
+      .eq("report_id", report.id).eq("user_id", user.id)
+      .then(({ data }) => {
+        const v = data?.find((d: any) => d.kind === "veracite");
+        const s = data?.find((d: any) => d.kind === "persistance");
+        setMyVerif(v?.is_true ?? null);
+        setMyStatus(s?.is_true ?? null);
+      });
   }, [user, report.id]);
 
   const verify = async (isTrue: boolean) => {
@@ -34,14 +41,31 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
     setVerifBusy(true);
     if (myVerif === isTrue) {
       await supabase.from("report_verifications").delete()
-        .eq("report_id", report.id).eq("user_id", user.id);
+        .eq("report_id", report.id).eq("user_id", user.id).eq("kind", "veracite");
       setMyVerif(null);
     } else {
       const { error } = await supabase.from("report_verifications")
-        .upsert({ report_id: report.id, user_id: user.id, is_true: isTrue }, { onConflict: "report_id,user_id" });
+        .upsert({ report_id: report.id, user_id: user.id, is_true: isTrue, kind: "veracite" }, { onConflict: "report_id,user_id,kind" });
       if (error) toast.error(error.message); else setMyVerif(isTrue);
     }
     setVerifBusy(false);
+    onVoteChange();
+  };
+
+  // isPersistent=true → "encore présent" ; false → "déjà résolu"
+  const reportStatus = async (isPersistent: boolean) => {
+    if (!user) { toast.info("Connectez-vous pour signaler le statut"); return; }
+    setStatusBusy(true);
+    if (myStatus === isPersistent) {
+      await supabase.from("report_verifications").delete()
+        .eq("report_id", report.id).eq("user_id", user.id).eq("kind", "persistance");
+      setMyStatus(null);
+    } else {
+      const { error } = await supabase.from("report_verifications")
+        .upsert({ report_id: report.id, user_id: user.id, is_true: isPersistent, kind: "persistance" }, { onConflict: "report_id,user_id,kind" });
+      if (error) toast.error(error.message); else setMyStatus(isPersistent);
+    }
+    setStatusBusy(false);
     onVoteChange();
   };
 
@@ -104,6 +128,20 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
             disabled={verifBusy} onClick={() => verify(false)}
             className={`h-7 gap-1 px-2 ${myVerif === false ? "bg-red-600 hover:bg-red-700" : ""}`}>
             <XCircle className="h-3 w-3" /> Faux · {report.false_count}
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-t pt-2 text-xs">
+          <span className="text-muted-foreground">État sur place :</span>
+          <Button size="sm" variant={myStatus === true ? "default" : "outline"}
+            disabled={statusBusy} onClick={() => reportStatus(true)}
+            className={`h-7 gap-1 px-2 ${myStatus === true ? "bg-amber-600 hover:bg-amber-700" : ""}`}>
+            <Clock className="h-3 w-3" /> Persistant · {report.persistent_count ?? 0}
+          </Button>
+          <Button size="sm" variant={myStatus === false ? "default" : "outline"}
+            disabled={statusBusy} onClick={() => reportStatus(false)}
+            className={`h-7 gap-1 px-2 ${myStatus === false ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}>
+            <Wrench className="h-3 w-3" /> Déjà résolu · {report.resolved_community_count ?? 0}
           </Button>
         </div>
 

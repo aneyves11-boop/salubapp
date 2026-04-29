@@ -264,9 +264,14 @@ function SignalerPage() {
               </div>
             )}
             {geoState === "error" && (
-              <Button type="button" variant="outline" size="sm" onClick={askLocation} className="gap-1">
-                <MapPin className="h-4 w-4" /> Réessayer la localisation
-              </Button>
+              <div className="space-y-2">
+                <p className="text-xs text-destructive">
+                  Position non disponible ou hors de la zone d'Abidjan. SalubApp ne couvre que la zone du Grand Abidjan.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={askLocation} className="gap-1">
+                  <MapPin className="h-4 w-4" /> Réessayer la localisation
+                </Button>
+              </div>
             )}
           </Card>
 

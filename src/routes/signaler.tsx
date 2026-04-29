@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { blurFacesInImage } from "@/lib/face-blur";
+import { isInAbidjan } from "@/lib/abidjan";
 
 export const Route = createFileRoute("/signaler")({
   head: () => ({ meta: [{ title: "Nouveau signalement — SalubApp" }] }),
@@ -43,7 +44,18 @@ function SignalerPage() {
     if (!navigator.geolocation) { toast.error("Géolocalisation non disponible"); setGeoState("error"); return; }
     setGeoState("loading");
     navigator.geolocation.getCurrentPosition(
-      (pos) => { setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setGeoState("ok"); },
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        if (!isInAbidjan(lat, lng)) {
+          setCoords(null);
+          setGeoState("error");
+          toast.error("Hors zone", { description: "SalubApp est limité à Abidjan. Votre position actuelle est en dehors du périmètre couvert." });
+          return;
+        }
+        setCoords({ lat, lng });
+        setGeoState("ok");
+      },
       (err) => { setGeoState("error"); toast.error("Position impossible", { description: err.message }); },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
     );
@@ -114,6 +126,10 @@ function SignalerPage() {
     if (!category) { toast.error("Choisissez une catégorie"); return; }
     if (description.trim().length < 5) { toast.error("Décrivez le problème en quelques mots"); return; }
     if (!coords) { toast.error("Position GPS requise"); return; }
+    if (!isInAbidjan(coords.lat, coords.lng)) {
+      toast.error("Hors zone Abidjan", { description: "Seuls les signalements dans la zone d'Abidjan sont acceptés." });
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -248,9 +264,14 @@ function SignalerPage() {
               </div>
             )}
             {geoState === "error" && (
-              <Button type="button" variant="outline" size="sm" onClick={askLocation} className="gap-1">
-                <MapPin className="h-4 w-4" /> Réessayer la localisation
-              </Button>
+              <div className="space-y-2">
+                <p className="text-xs text-destructive">
+                  Position non disponible ou hors de la zone d'Abidjan. SalubApp ne couvre que la zone du Grand Abidjan.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={askLocation} className="gap-1">
+                  <MapPin className="h-4 w-4" /> Réessayer la localisation
+                </Button>
+              </div>
             )}
           </Card>
 

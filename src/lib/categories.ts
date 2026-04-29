@@ -3,6 +3,11 @@ import type { Database } from "@/integrations/supabase/types";
 export type Category = Database["public"]["Enums"]["report_category"];
 export type Status = Database["public"]["Enums"]["report_status"];
 
+// ✏️ ÉDITION DES CATÉGORIES
+// - Renommer un libellé : modifiez simplement le `label` ci-dessous.
+// - Ajouter / supprimer une catégorie : nécessite une migration de l'enum
+//   `report_category` en base de données. Demandez-le et je m'en occupe.
+// - Réordonner : changez l'ordre des entrées du tableau.
 export const CATEGORIES: { value: Category; label: string }[] = [
   { value: "dechets", label: "Déchets / ordures" },
   { value: "eaux_usees", label: "Eaux usées" },

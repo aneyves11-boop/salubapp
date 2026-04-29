@@ -1,8 +1,8 @@
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
-import { useMemo } from "react";
 import { categoryLabel, statusInfo } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
+import { ABIDJAN_CENTER, ABIDJAN_DEFAULT_ZOOM, ABIDJAN_LEAFLET_BOUNDS } from "@/lib/abidjan";
 
 type Report = Database["public"]["Tables"]["reports"]["Row"];
 
@@ -16,15 +16,16 @@ function categoryMarker(label: string) {
 }
 
 export function ReportsMap({ reports }: { reports: Report[] }) {
-  const center = useMemo<[number, number]>(() => {
-    if (reports.length === 0) return [7.5, -5.5]; // centre Afrique de l'Ouest par défaut
-    const lat = reports.reduce((s, r) => s + r.latitude, 0) / reports.length;
-    const lng = reports.reduce((s, r) => s + r.longitude, 0) / reports.length;
-    return [lat, lng];
-  }, [reports]);
-
   return (
-    <MapContainer center={center} zoom={reports.length ? 12 : 5} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
+    <MapContainer
+      center={ABIDJAN_CENTER}
+      zoom={ABIDJAN_DEFAULT_ZOOM}
+      minZoom={10}
+      maxBounds={ABIDJAN_LEAFLET_BOUNDS}
+      maxBoundsViscosity={1}
+      style={{ height: "100%", width: "100%" }}
+      scrollWheelZoom
+    >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

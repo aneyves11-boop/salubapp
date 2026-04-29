@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
-import { LogOut, MapPin, PlusCircle, ShieldCheck, Flame, Settings } from "lucide-react";
+import { LogOut, PlusCircle, ShieldCheck, Flame, Settings } from "lucide-react";
 
 export function AppHeader() {
   const { user, isAutorite, roles, signOut } = useAuth();
@@ -12,9 +12,7 @@ export function AppHeader() {
     <header className="sticky top-0 z-40 border-b bg-card/95 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <MapPin className="h-5 w-5" />
-          </div>
+          <img src="/mqp.png" alt="Mon Quartier Propre" className="h-9 w-9 rounded-lg object-cover" />
           <div>
             <div className="text-base font-bold leading-none">SalubApp</div>
             <div className="text-[10px] text-muted-foreground">Pour des villes propres</div>

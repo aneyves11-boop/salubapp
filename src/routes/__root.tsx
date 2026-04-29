@@ -43,8 +43,8 @@ export const Route = createRootRoute({
       { name: "twitter:card", content: "summary" },
       { name: "twitter:title", content: "SalubApp — Signalez l'insalubrité dans votre quartier" },
       { name: "twitter:description", content: "Plateforme citoyenne pour signaler les problèmes d'insalubrité et d'incivisme en Afrique francophone." },
-      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8651c062-8403-4dc1-82cd-96fe5f1b7125/id-preview-474eae2e--ff3aca4a-46b4-4fc4-9162-b4d9d0ee27b5.lovable.app-1777302622974.png" },
-      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/8651c062-8403-4dc1-82cd-96fe5f1b7125/id-preview-474eae2e--ff3aca4a-46b4-4fc4-9162-b4d9d0ee27b5.lovable.app-1777302622974.png" },
+      { property: "og:image", content: "/mqp.png" },
+      { name: "twitter:image", content: "/mqp.png" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

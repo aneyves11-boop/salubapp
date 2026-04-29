@@ -6,11 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { categoryLabel, statusInfo } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
-import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench } from "lucide-react";
+import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench, MessageSquare, Send } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 
 type Report = Database["public"]["Tables"]["reports"]["Row"];
+type Comment = { id: string; user_email: string; content: string; created_at: string; user_id: string };
 
 export function ReportCard({ report, hasVoted, onVoteChange }: {
   report: Report; hasVoted: boolean; onVoteChange: () => void;
@@ -21,6 +23,11 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
   const [myVerif, setMyVerif] = useState<boolean | null>(null);
   const [myStatus, setMyStatus] = useState<boolean | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [newComment, setNewComment] = useState("");
+  const [submittingComment, setSubmittingComment] = useState(false);
   const status = statusInfo(report.status);
   const created = new Date(report.created_at);
 
@@ -91,6 +98,38 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
     onVoteChange();
   };
 
+  const loadComments = async () => {
+    setCommentsLoading(true);
+    const { data } = await (supabase as any).from("report_comments")
+      .select("id, user_email, content, created_at, user_id")
+      .eq("report_id", report.id)
+      .order("created_at", { ascending: true });
+    setComments(data ?? []);
+    setCommentsLoading(false);
+  };
+
+  const toggleComments = () => {
+    if (!showComments) loadComments();
+    setShowComments((v) => !v);
+  };
+
+  const submitComment = async () => {
+    if (!user) { toast.info("Connectez-vous pour commenter"); return; }
+    if (!newComment.trim()) return;
+    setSubmittingComment(true);
+    const { error } = await (supabase as any).from("report_comments").insert({
+      report_id: report.id,
+      user_id: user.id,
+      user_email: user.email,
+      content: newComment.trim(),
+    });
+    if (error) { toast.error(error.message); } else {
+      setNewComment("");
+      await loadComments();
+    }
+    setSubmittingComment(false);
+  };
+
   return (
     <Card className="overflow-hidden">
       {report.photo_url && (
@@ -157,6 +196,52 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
             }}>
             Voir sur la carte ↗
           </Link>
+        </div>
+
+        <div className="border-t pt-2">
+          <button onClick={toggleComments} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <MessageSquare className="h-3.5 w-3.5" />
+            {showComments ? "Masquer les notes" : `Notes${comments.length > 0 ? ` (${comments.length})` : ""}`}
+          </button>
+
+          {showComments && (
+            <div className="mt-3 space-y-3">
+              {commentsLoading ? (
+                <p className="text-xs text-muted-foreground">Chargement…</p>
+              ) : comments.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Aucune note pour l'instant.</p>
+              ) : (
+                comments.map((c) => (
+                  <div key={c.id} className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2 text-muted-foreground mb-1">
+                      <span className="font-medium truncate">{c.user_email}</span>
+                      <span className="shrink-0">{new Date(c.created_at).toLocaleDateString("fr-FR")}</span>
+                    </div>
+                    <p className="whitespace-pre-wrap">{c.content}</p>
+                  </div>
+                ))
+              )}
+
+              {user ? (
+                <div className="flex gap-2">
+                  <Textarea
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Ajouter une note…"
+                    maxLength={500}
+                    rows={2}
+                    className="text-xs resize-none"
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
+                  />
+                  <Button size="icon" variant="outline" disabled={submittingComment || !newComment.trim()} onClick={submitComment} className="shrink-0 self-end h-8 w-8">
+                    <Send className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Connectez-vous pour laisser une note.</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </Card>

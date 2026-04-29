@@ -10,11 +10,15 @@ const corsHeaders = {
 
 const CATEGORIES = [
   { value: "dechets", label: "Déchets / ordures" },
-  { value: "eaux_usees", label: "Eaux usées" },
+  { value: "eaux_usees", label: "Caniveaux ouverts / bouchés" },
   { value: "voirie", label: "Voirie / nids-de-poule" },
-  { value: "marche", label: "Marché insalubre" },
-  { value: "eau_stagnante", label: "Eau stagnante / moustiques" },
-  { value: "autre", label: "Autre incivisme" },
+  { value: "eau_stagnante", label: "Eau stagnante" },
+  { value: "chantier_peril", label: "Nuisance / péril imminent (chantier)" },
+  { value: "chantier_signalisation", label: "Absence de signalisation de chantier" },
+  { value: "emprise_chaussee", label: "Emprise illicite sur la chaussée" },
+  { value: "chantier_ecoulement", label: "Entrave à l'écoulement des eaux (chantier)" },
+  { value: "fuite_sodeci", label: "Fuite d'eau (tuyaux SODECI)" },
+  { value: "autre", label: "Autre" },
 ] as const;
 
 serve(async (req) => {
@@ -61,7 +65,11 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `Tu es un expert en salubrité urbaine en Afrique francophone. Analyse l'image et identifie le type de problème d'insalubrité ou d'incivisme. Réponds UNIQUEMENT en français. Catégories disponibles : ${labelMap}.`,
+            content: `Tu es un expert en salubrité urbaine et voirie à Abidjan. Tu analyses UNIQUEMENT des photos liées à : insalubrité urbaine (déchets, eaux usées, eau stagnante), voirie (nids-de-poule), problèmes de chantiers urbains (signalisation manquante, péril, emprise sur la chaussée, entrave à l'écoulement), et fuites de canalisations d'eau publique (SODECI).
+
+Si l'image NE MONTRE PAS un problème urbain de ce type (par exemple : photo d'appareil électronique, selfie, animal de compagnie, intérieur de maison, écran, document, capture d'écran, dessin, paysage naturel sans problème, nourriture, etc.), tu dois mettre is_relevant=false avec un message d'explication court. Sinon is_relevant=true.
+
+Réponds UNIQUEMENT en français. Catégories disponibles : ${labelMap}.`,
           },
           {
             role: "user",
@@ -80,11 +88,13 @@ serve(async (req) => {
               parameters: {
                 type: "object",
                 properties: {
+                  is_relevant: { type: "boolean", description: "true si l'image montre un problème d'insalubrité urbaine ou de voirie/chantier à Abidjan, false sinon" },
+                  reason: { type: "string", description: "Si is_relevant=false, courte raison du rejet en français" },
                   category: { type: "string", enum: CATEGORIES.map((c) => c.value), description: `Une parmi : ${allowedValues}` },
                   description: { type: "string", description: "Description courte (1-2 phrases) en français du problème observé" },
                   confidence: { type: "number", description: "Confiance entre 0 et 1" },
                 },
-                required: ["category", "description", "confidence"],
+                required: ["is_relevant", "category", "description", "confidence"],
                 additionalProperties: false,
               },
             },

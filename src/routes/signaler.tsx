@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { toast } from "sonner";
-import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck } from "lucide-react";
+import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { blurFacesInImage } from "@/lib/face-blur";
 import { isInAbidjan } from "@/lib/abidjan";
@@ -211,12 +211,20 @@ function SignalerPage() {
 
           <Card className="p-4">
             <Label className="mb-2 block">Photo (recommandé)</Label>
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground hover:border-primary/50">
-              <Camera className="h-5 w-5" />
-              {photo ? "Changer la photo" : "Prendre / choisir une photo"}
-              <input type="file" accept="image/*" capture="environment" className="hidden"
-                onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)} />
-            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/50">
+                <Camera className="h-5 w-5" />
+                <span>Prendre une photo</span>
+                <input type="file" accept="image/*" capture="environment" className="hidden"
+                  onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)} />
+              </label>
+              <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/50">
+                <ImageIcon className="h-5 w-5" />
+                <span>Importer depuis la galerie</span>
+                <input type="file" accept="image/*" className="hidden"
+                  onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)} />
+              </label>
+            </div>
             <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
               <ShieldCheck className="h-3 w-3" /> Les visages sont automatiquement floutés sur votre appareil avant l'envoi.
             </p>

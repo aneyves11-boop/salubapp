@@ -14,6 +14,12 @@ import { Link } from "@tanstack/react-router";
 type Report = Database["public"]["Tables"]["reports"]["Row"];
 type Comment = { id: string; user_email: string; content: string; created_at: string; user_id: string };
 
+function maskEmail(email: string) {
+  const [local, domain] = email.split("@");
+  if (!domain) return email;
+  return local.charAt(0) + "***@" + domain;
+}
+
 export function ReportCard({ report, hasVoted, onVoteChange }: {
   report: Report; hasVoted: boolean; onVoteChange: () => void;
 }) {
@@ -214,7 +220,7 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
                 comments.map((c) => (
                   <div key={c.id} className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
                     <div className="flex items-center justify-between gap-2 text-muted-foreground mb-1">
-                      <span className="font-medium truncate">{c.user_email}</span>
+                      <span className="font-medium truncate">{maskEmail(c.user_email)}</span>
                       <span className="shrink-0">{new Date(c.created_at).toLocaleDateString("fr-FR")}</span>
                     </div>
                     <p className="whitespace-pre-wrap">{c.content}</p>

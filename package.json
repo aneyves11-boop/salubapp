@@ -4,6 +4,7 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/patch-lovable.mjs",
     "dev": "vite dev",
     "build": "vite build",
     "build:dev": "vite build --mode development",
@@ -71,6 +72,9 @@
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
     "zod": "^3.24.2"
+  },
+  "overrides": {
+    "lovable-tagger": "file:./lovable-tagger-noop"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",

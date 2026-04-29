@@ -19,6 +19,7 @@ export type Database = {
           created_at: string
           id: string
           is_true: boolean
+          kind: Database["public"]["Enums"]["verification_kind"]
           report_id: string
           user_id: string
         }
@@ -26,6 +27,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_true: boolean
+          kind?: Database["public"]["Enums"]["verification_kind"]
           report_id: string
           user_id: string
         }
@@ -33,6 +35,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_true?: boolean
+          kind?: Database["public"]["Enums"]["verification_kind"]
           report_id?: string
           user_id?: string
         }
@@ -84,7 +87,9 @@ export type Database = {
           id: string
           latitude: number
           longitude: number
+          persistent_count: number
           photo_url: string | null
+          resolved_community_count: number
           status: Database["public"]["Enums"]["report_status"]
           true_count: number
           updated_at: string
@@ -101,7 +106,9 @@ export type Database = {
           id?: string
           latitude: number
           longitude: number
+          persistent_count?: number
           photo_url?: string | null
+          resolved_community_count?: number
           status?: Database["public"]["Enums"]["report_status"]
           true_count?: number
           updated_at?: string
@@ -118,7 +125,9 @@ export type Database = {
           id?: string
           latitude?: number
           longitude?: number
+          persistent_count?: number
           photo_url?: string | null
+          resolved_community_count?: number
           status?: Database["public"]["Enums"]["report_status"]
           true_count?: number
           updated_at?: string
@@ -172,7 +181,13 @@ export type Database = {
         | "marche"
         | "eau_stagnante"
         | "autre"
+        | "chantier_peril"
+        | "chantier_signalisation"
+        | "emprise_chaussee"
+        | "chantier_ecoulement"
+        | "fuite_sodeci"
       report_status: "nouveau" | "en_cours" | "resolu" | "rejete"
+      verification_kind: "veracite" | "persistance"
       verification_status: "en_attente" | "valide" | "rejete" | "douteux"
     }
     CompositeTypes: {
@@ -309,8 +324,14 @@ export const Constants = {
         "marche",
         "eau_stagnante",
         "autre",
+        "chantier_peril",
+        "chantier_signalisation",
+        "emprise_chaussee",
+        "chantier_ecoulement",
+        "fuite_sodeci",
       ],
       report_status: ["nouveau", "en_cours", "resolu", "rejete"],
+      verification_kind: ["veracite", "persistance"],
       verification_status: ["en_attente", "valide", "rejete", "douteux"],
     },
   },

@@ -35,6 +35,7 @@ function SignalerPage() {
   const [aiSuggestion, setAiSuggestion] = useState<{ category: Category; confidence: number } | null>(null);
   const [blurring, setBlurring] = useState(false);
   const [facesBlurred, setFacesBlurred] = useState<number | null>(null);
+  const [imageRejected, setImageRejected] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/login" });
@@ -68,6 +69,7 @@ function SignalerPage() {
     setAiSuggestion(null);
     setFacesBlurred(null);
     if (!file) { setPhoto(null); setPhotoPreview(null); return; }
+    setImageRejected(null);
     setBlurring(true);
     try {
       const { blob, facesDetected } = await blurFacesInImage(file);
@@ -107,8 +109,18 @@ function SignalerPage() {
         body: { imageBase64, mimeType: file.type || "image/jpeg" },
       });
       if (error) throw error;
-      const result = data as { category: Category; description: string; confidence: number; error?: string };
+      const result = data as { is_relevant?: boolean; reason?: string; category: Category; description: string; confidence: number; error?: string };
       if (result.error) throw new Error(result.error);
+      if (result.is_relevant === false) {
+        const reason = result.reason || "Cette image ne semble pas montrer un problème de salubrité urbaine.";
+        setImageRejected(reason);
+        setPhoto(null);
+        if (photoPreview) URL.revokeObjectURL(photoPreview);
+        setPhotoPreview(null);
+        setAiSuggestion(null);
+        toast.error("Image refusée", { description: reason });
+        return;
+      }
       setAiSuggestion({ category: result.category, confidence: result.confidence });
       // Pré-remplit catégorie si vide, et description si vide
       setCategory((prev) => prev ?? result.category);
@@ -128,6 +140,10 @@ function SignalerPage() {
     if (!coords) { toast.error("Position GPS requise"); return; }
     if (!isInAbidjan(coords.lat, coords.lng)) {
       toast.error("Hors zone Abidjan", { description: "Seuls les signalements dans la zone d'Abidjan sont acceptés." });
+      return;
+    }
+    if (imageRejected) {
+      toast.error("Image non valide", { description: "Veuillez fournir une photo en lien avec l'insalubrité urbaine." });
       return;
     }
 
@@ -236,6 +252,12 @@ function SignalerPage() {
             {facesBlurred !== null && !blurring && (
               <div className="mt-2 text-xs text-emerald-700">
                 {facesBlurred === 0 ? "Aucun visage détecté." : `${facesBlurred} visage(s) flouté(s).`}
+              </div>
+            )}
+            {imageRejected && (
+              <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+                <strong>Image refusée :</strong> {imageRejected}
+                <div className="mt-1 text-[11px]">SalubApp n'accepte que les photos liées à la salubrité urbaine, la voirie ou les chantiers.</div>
               </div>
             )}
             {photoPreview && (

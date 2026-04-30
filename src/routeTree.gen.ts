@@ -14,7 +14,8 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ConfidentialiteRouteImport } from './routes/confidentialite'
 import { Route as CarteRouteImport } from './routes/carte'
-import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AvisRouteImport } from './routes/avis'
+import { Route as Administrator_appRouteImport } from './routes/administrator_app'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SignalerRoute = SignalerRouteImport.update({
@@ -42,9 +43,14 @@ const CarteRoute = CarteRouteImport.update({
   path: '/carte',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminRoute = AdminRouteImport.update({
-  id: '/admin',
-  path: '/admin',
+const AvisRoute = AvisRouteImport.update({
+  id: '/avis',
+  path: '/avis',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const Administrator_appRoute = Administrator_appRouteImport.update({
+  id: '/administrator_app',
+  path: '/administrator_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -55,7 +61,8 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/administrator_app': typeof Administrator_appRoute
+  '/avis': typeof AvisRoute
   '/carte': typeof CarteRoute
   '/confidentialite': typeof ConfidentialiteRoute
   '/dashboard': typeof DashboardRoute
@@ -64,7 +71,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/administrator_app': typeof Administrator_appRoute
+  '/avis': typeof AvisRoute
   '/carte': typeof CarteRoute
   '/confidentialite': typeof ConfidentialiteRoute
   '/dashboard': typeof DashboardRoute
@@ -74,7 +82,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/administrator_app': typeof Administrator_appRoute
+  '/avis': typeof AvisRoute
   '/carte': typeof CarteRoute
   '/confidentialite': typeof ConfidentialiteRoute
   '/dashboard': typeof DashboardRoute
@@ -85,7 +94,8 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/admin'
+    | '/administrator_app'
+    | '/avis'
     | '/carte'
     | '/confidentialite'
     | '/dashboard'
@@ -94,7 +104,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/admin'
+    | '/administrator_app'
+    | '/avis'
     | '/carte'
     | '/confidentialite'
     | '/dashboard'
@@ -103,7 +114,8 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/admin'
+    | '/administrator_app'
+    | '/avis'
     | '/carte'
     | '/confidentialite'
     | '/dashboard'
@@ -113,7 +125,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AdminRoute: typeof AdminRoute
+  Administrator_appRoute: typeof Administrator_appRoute
+  AvisRoute: typeof AvisRoute
   CarteRoute: typeof CarteRoute
   ConfidentialiteRoute: typeof ConfidentialiteRoute
   DashboardRoute: typeof DashboardRoute
@@ -158,11 +171,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CarteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin': {
-      id: '/admin'
-      path: '/admin'
-      fullPath: '/admin'
-      preLoaderRoute: typeof AdminRouteImport
+    '/avis': {
+      id: '/avis'
+      path: '/avis'
+      fullPath: '/avis'
+      preLoaderRoute: typeof AvisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/administrator_app': {
+      id: '/administrator_app'
+      path: '/administrator_app'
+      fullPath: '/administrator_app'
+      preLoaderRoute: typeof Administrator_appRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -177,7 +197,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AdminRoute: AdminRoute,
+  Administrator_appRoute: Administrator_appRoute,
+  AvisRoute: AvisRoute,
   CarteRoute: CarteRoute,
   ConfidentialiteRoute: ConfidentialiteRoute,
   DashboardRoute: DashboardRoute,

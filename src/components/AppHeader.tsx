@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
-import { LogOut, PlusCircle, ShieldCheck, Flame, Settings } from "lucide-react";
+import { LogOut, PlusCircle, ShieldCheck, Flame, Settings, UserCircle2 } from "lucide-react";
 
 export function AppHeader() {
   const { user, isAutorite, roles, signOut } = useAuth();
@@ -34,6 +34,9 @@ export function AppHeader() {
           )}
           {user ? (
             <>
+              <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 sm:inline-flex">
+                <UserCircle2 className="h-3 w-3" /> Anonyme
+              </span>
               <Button asChild size="sm" className="gap-1">
                 <Link to="/signaler"><PlusCircle className="h-4 w-4" />Signaler</Link>
               </Button>
@@ -42,7 +45,9 @@ export function AppHeader() {
               </Button>
             </>
           ) : (
-            <Button asChild size="sm"><Link to="/login">Se connecter</Link></Button>
+            <Button asChild size="sm" className="gap-1">
+              <Link to="/login"><PlusCircle className="h-4 w-4" />Signaler</Link>
+            </Button>
           )}
         </nav>
       </div>

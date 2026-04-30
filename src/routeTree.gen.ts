@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SignalerRouteImport } from './routes/signaler'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as ConfidentialiteRouteImport } from './routes/confidentialite'
 import { Route as CarteRouteImport } from './routes/carte'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -29,6 +30,11 @@ const LoginRoute = LoginRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConfidentialiteRoute = ConfidentialiteRouteImport.update({
+  id: '/confidentialite',
+  path: '/confidentialite',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CarteRoute = CarteRouteImport.update({
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/carte': typeof CarteRoute
+  '/confidentialite': typeof ConfidentialiteRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/carte': typeof CarteRoute
+  '/confidentialite': typeof ConfidentialiteRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
@@ -68,20 +76,36 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/carte': typeof CarteRoute
+  '/confidentialite': typeof ConfidentialiteRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/carte' | '/dashboard' | '/login' | '/signaler'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/carte'
+    | '/confidentialite'
+    | '/dashboard'
+    | '/login'
+    | '/signaler'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/carte' | '/dashboard' | '/login' | '/signaler'
+  to:
+    | '/'
+    | '/admin'
+    | '/carte'
+    | '/confidentialite'
+    | '/dashboard'
+    | '/login'
+    | '/signaler'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/carte'
+    | '/confidentialite'
     | '/dashboard'
     | '/login'
     | '/signaler'
@@ -91,6 +115,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   CarteRoute: typeof CarteRoute
+  ConfidentialiteRoute: typeof ConfidentialiteRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
   SignalerRoute: typeof SignalerRoute
@@ -117,6 +142,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/confidentialite': {
+      id: '/confidentialite'
+      path: '/confidentialite'
+      fullPath: '/confidentialite'
+      preLoaderRoute: typeof ConfidentialiteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/carte': {
@@ -147,6 +179,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   CarteRoute: CarteRoute,
+  ConfidentialiteRoute: ConfidentialiteRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
   SignalerRoute: SignalerRoute,

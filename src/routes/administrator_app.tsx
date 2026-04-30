@@ -15,7 +15,7 @@ import { toast } from "sonner";
 type Report = Database["public"]["Tables"]["reports"]["Row"];
 type VerifStatus = "en_attente" | "valide" | "rejete" | "douteux";
 
-export const Route = createFileRoute("/admin")({
+export const Route = createFileRoute("/administrator_app")({
   head: () => ({ meta: [{ title: "Administration — SalubApp" }] }),
   component: AdminPage,
 });

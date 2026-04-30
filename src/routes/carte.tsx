@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth-context";
 import { AppHeader } from "@/components/AppHeader";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,13 +23,15 @@ export const Route = createFileRoute("/carte")({
 });
 
 function PublicDashboard() {
+  const { user } = useAuth();
   const [reports, setReports] = useState<Report[] | null>(null);
   const [active, setActive] = useState<Set<Category>>(new Set(CATEGORIES.map((c) => c.value)));
 
   useEffect(() => {
-    supabase.from("reports").select("*").order("created_at", { ascending: false }).limit(1000)
-      .then(({ data }) => setReports(data ?? []));
-  }, []);
+    const source = user ? "reports" : "reports_public";
+    (supabase as any).from(source).select("*").order("created_at", { ascending: false }).limit(1000)
+      .then(({ data }: { data: Report[] | null }) => setReports(data ?? []));
+  }, [user?.id]);
 
   const filtered = useMemo(
     () => (reports ?? []).filter((r) => active.has(r.category as Category)),

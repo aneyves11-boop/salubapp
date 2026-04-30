@@ -30,8 +30,11 @@ function HomePage() {
   const [filter, setFilter] = useState<Category | "all">("all");
 
   const load = async () => {
-    const { data } = await supabase.from("reports").select("*").order("created_at", { ascending: false }).limit(200);
-    setReports(data ?? []);
+    // Visiteurs anonymes : on lit la vue publique (sans user_id, coordonnées floutées).
+    // Utilisateurs connectés : table complète (nécessaire pour vérifier/voter/commenter).
+    const source = user ? "reports" : "reports_public";
+    const { data } = await (supabase as any).from(source).select("*").order("created_at", { ascending: false }).limit(200);
+    setReports((data ?? []) as Report[]);
     if (user && data && data.length) {
       const { data: votes } = await supabase.from("report_votes").select("report_id").eq("user_id", user.id);
       setVotedIds(new Set((votes ?? []).map((v) => v.report_id)));

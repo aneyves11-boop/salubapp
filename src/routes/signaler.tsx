@@ -201,10 +201,11 @@ function SignalerPage() {
             <div className="grid grid-cols-2 gap-2">
               {CATEGORIES.map((c) => (
                 <button key={c.value} type="button" onClick={() => setCategory(c.value)}
-                  className={`flex flex-col items-start gap-1 rounded-lg border-2 p-3 text-left text-sm transition ${
+                  className={`group flex flex-col gap-2 overflow-hidden rounded-lg border-2 p-0 text-left text-sm transition ${
                     category === c.value ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
                   }`}>
-                  <span className="font-medium leading-tight">{c.label}</span>
+                  <img src={c.image} alt="" loading="lazy" className="h-20 w-full object-cover" />
+                  <span className="px-3 pb-2 text-xs font-medium leading-tight">{c.label}</span>
                 </button>
               ))}
             </div>

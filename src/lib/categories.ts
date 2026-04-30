@@ -1,4 +1,11 @@
 import type { Database } from "@/integrations/supabase/types";
+import dechetsImg from "@/assets/categories/dechets.png";
+import voirieImg from "@/assets/categories/voirie.png";
+import eauxUseesImg from "@/assets/categories/eaux_usees.png";
+import eauStagnanteImg from "@/assets/categories/eau_stagnante.png";
+import chantierPerilImg from "@/assets/categories/chantier_peril.png";
+import chantierEcoulementImg from "@/assets/categories/chantier_ecoulement.png";
+import fuiteSodeciImg from "@/assets/categories/fuite_sodeci.png";
 
 export type Category = Database["public"]["Enums"]["report_category"];
 export type Status = Database["public"]["Enums"]["report_status"];
@@ -8,17 +15,17 @@ export type Status = Database["public"]["Enums"]["report_status"];
 // - Ajouter / supprimer une catégorie : nécessite une migration de l'enum
 //   `report_category` en base de données. Demandez-le et je m'en occupe.
 // - Réordonner : changez l'ordre des entrées du tableau.
-export const CATEGORIES: { value: Category; label: string }[] = [
-  { value: "dechets", label: "Déchets / ordures" },
-  { value: "eaux_usees", label: "Caniveaux ouverts / bouchés" },
-  { value: "voirie", label: "Voirie / nids-de-poule" },
-  { value: "eau_stagnante", label: "Eau stagnante" },
-  { value: "chantier_peril" as Category, label: "Nuisance / péril imminent (chantier)" },
-  { value: "chantier_signalisation" as Category, label: "Absence de signalisation de chantier" },
-  { value: "emprise_chaussee" as Category, label: "Emprise illicite sur la chaussée" },
-  { value: "chantier_ecoulement" as Category, label: "Entrave à l'écoulement des eaux (chantier)" },
-  { value: "fuite_sodeci" as Category, label: "Fuite d'eau (tuyaux SODECI)" },
-  { value: "autre", label: "Autre" },
+export const CATEGORIES: { value: Category; label: string; image: string }[] = [
+  { value: "dechets", label: "Déchets / ordures", image: dechetsImg },
+  { value: "eaux_usees", label: "Caniveaux ouverts / bouchés", image: eauxUseesImg },
+  { value: "voirie", label: "Voirie / nids-de-poule", image: voirieImg },
+  { value: "eau_stagnante", label: "Eau stagnante", image: eauStagnanteImg },
+  { value: "chantier_peril" as Category, label: "Nuisance / péril imminent (chantier)", image: chantierPerilImg },
+  { value: "chantier_signalisation" as Category, label: "Absence de signalisation de chantier", image: chantierPerilImg },
+  { value: "emprise_chaussee" as Category, label: "Emprise illicite sur la chaussée", image: chantierEcoulementImg },
+  { value: "chantier_ecoulement" as Category, label: "Entrave à l'écoulement des eaux (chantier)", image: chantierEcoulementImg },
+  { value: "fuite_sodeci" as Category, label: "Fuite d'eau (tuyaux SODECI)", image: fuiteSodeciImg },
+  { value: "autre", label: "Autre", image: dechetsImg },
 ];
 
 export const STATUSES: { value: Status; label: string; color: string }[] = [
@@ -29,4 +36,5 @@ export const STATUSES: { value: Status; label: string; color: string }[] = [
 ];
 
 export const categoryLabel = (c: Category) => CATEGORIES.find((x) => x.value === c)?.label ?? c;
+export const categoryImage = (c: Category) => CATEGORIES.find((x) => x.value === c)?.image ?? dechetsImg;
 export const statusInfo = (s: Status) => STATUSES.find((x) => x.value === s)!;

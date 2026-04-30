@@ -47,6 +47,13 @@ export type Database = {
             referencedRelation: "reports"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "report_verifications_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports_public"
+            referencedColumns: ["id"]
+          },
         ]
       }
       report_votes: {
@@ -74,6 +81,13 @@ export type Database = {
             columns: ["report_id"]
             isOneToOne: false
             referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_votes_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports_public"
             referencedColumns: ["id"]
           },
         ]
@@ -161,7 +175,69 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      reports_public: {
+        Row: {
+          category: Database["public"]["Enums"]["report_category"] | null
+          created_at: string | null
+          description: string | null
+          false_count: number | null
+          id: string | null
+          latitude: number | null
+          longitude: number | null
+          persistent_count: number | null
+          photo_url: string | null
+          resolved_community_count: number | null
+          status: Database["public"]["Enums"]["report_status"] | null
+          true_count: number | null
+          updated_at: string | null
+          verified_status:
+            | Database["public"]["Enums"]["verification_status"]
+            | null
+          ville: string | null
+          votes_count: number | null
+        }
+        Insert: {
+          category?: Database["public"]["Enums"]["report_category"] | null
+          created_at?: string | null
+          description?: string | null
+          false_count?: number | null
+          id?: string | null
+          latitude?: never
+          longitude?: never
+          persistent_count?: number | null
+          photo_url?: string | null
+          resolved_community_count?: number | null
+          status?: Database["public"]["Enums"]["report_status"] | null
+          true_count?: number | null
+          updated_at?: string | null
+          verified_status?:
+            | Database["public"]["Enums"]["verification_status"]
+            | null
+          ville?: string | null
+          votes_count?: number | null
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["report_category"] | null
+          created_at?: string | null
+          description?: string | null
+          false_count?: number | null
+          id?: string | null
+          latitude?: never
+          longitude?: never
+          persistent_count?: number | null
+          photo_url?: string | null
+          resolved_community_count?: number | null
+          status?: Database["public"]["Enums"]["report_status"] | null
+          true_count?: number | null
+          updated_at?: string | null
+          verified_status?:
+            | Database["public"]["Enums"]["verification_status"]
+            | null
+          ville?: string | null
+          votes_count?: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       has_role: {

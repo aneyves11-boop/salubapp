@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { categoryLabel, statusInfo } from "@/lib/categories";
+import { categoryImage, categoryLabel, statusInfo } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
 import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench, MessageSquare, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
@@ -138,10 +138,19 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
 
   return (
     <Card className="overflow-hidden">
-      {report.photo_url && (
-        <img src={report.photo_url} alt={categoryLabel(report.category)} loading="lazy"
-          className="h-48 w-full object-cover" />
-      )}
+      <div className="relative">
+        <img
+          src={report.photo_url || categoryImage(report.category)}
+          alt={categoryLabel(report.category)}
+          loading="lazy"
+          className="h-48 w-full object-cover"
+        />
+        {!report.photo_url && (
+          <span className="absolute bottom-2 left-2 rounded-md bg-black/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
+            Illustration
+          </span>
+        )}
+      </div>
       <div className="space-y-2 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">

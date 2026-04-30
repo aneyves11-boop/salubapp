@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
-import { LogOut, PlusCircle, ShieldCheck, Flame, Settings, UserCircle2 } from "lucide-react";
+import { LogOut, PlusCircle, ShieldCheck, Flame, Settings, UserCircle2, ShieldAlert } from "lucide-react";
 
 export function AppHeader() {
   const { user, isAutorite, roles, signOut } = useAuth();
@@ -29,7 +29,7 @@ export function AppHeader() {
           )}
           {isAdmin && (
             <Button asChild variant="ghost" size="sm">
-              <Link to="/admin"><Settings className="mr-1 h-4 w-4" />Admin</Link>
+              <Link to="/administrator_app"><Settings className="mr-1 h-4 w-4" />Admin</Link>
             </Button>
           )}
           {user ? (

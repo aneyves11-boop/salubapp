@@ -146,3 +146,12 @@
     color: var(--color-foreground);
   }
 }
+
+/* Masque le badge "Edit with Lovable" injecté par la plateforme */
+#lovable-badge,
+lovable-badge,
+[id^="lovable"],
+[class*="lovable-badge"],
+iframe[src*="lovable"] {
+  display: none !important;
+}

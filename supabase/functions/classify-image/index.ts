@@ -1,5 +1,5 @@
 // Edge function : classification d'image pour SalubApp
-// Utilise Lovable AI Gateway (Gemini multimodal) pour suggérer catégorie + description.
+// Utilise l'API Google Gemini (multimodal) pour suggérer catégorie + description.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
@@ -50,18 +50,19 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY non configuré");
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY non configuré");
 
     const dataUrl = `data:${mimeType || "image/jpeg"};base64,${imageBase64}`;
     const allowedValues = CATEGORIES.map((c) => c.value).join(", ");
     const labelMap = CATEGORIES.map((c) => `${c.value} = ${c.label}`).join(" | ");
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // API Gemini officielle (endpoint compatible OpenAI) — clé gratuite sur https://aistudio.google.com
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
-      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${GEMINI_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gemini-2.5-flash",
         messages: [
           {
             role: "system",
@@ -111,12 +112,12 @@ Réponds UNIQUEMENT en français. Catégories disponibles : ${labelMap}.`,
         });
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Crédits IA épuisés. Ajoutez des crédits dans votre workspace Lovable." }), {
+        return new Response(JSON.stringify({ error: "Quota IA épuisé. Vérifiez votre clé Gemini sur Google AI Studio." }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
+      console.error("Gemini API error:", response.status, t);
       return new Response(JSON.stringify({ error: "Service IA indisponible" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

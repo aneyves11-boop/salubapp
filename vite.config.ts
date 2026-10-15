@@ -1,9 +1,45 @@
-// @lovable.dev/vite-tanstack-config already includes the following — do NOT add them manually
-// or the app will break with duplicate plugins:
-//   - tanstackStart, viteReact, tailwindcss, tsConfigPaths, cloudflare (build-only),
-//     componentTagger (dev-only), VITE_* env injection, @ path alias, React/TanStack dedupe,
-//     error logger plugins, and sandbox detection (port/host/strictPort).
-// You can pass additional config via defineConfig({ vite: { ... } }) if needed.
-import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+// Configuration Vite standard (remplace @lovable.dev/vite-tanstack-config).
+// Reproduit exactement ce que faisait la config Lovable : Tailwind, alias "@",
+// TanStack Start, React, et Cloudflare uniquement au build.
+import { defineConfig, type PluginOption } from "vite";
+import tailwindcss from "@tailwindcss/vite";
+import tsConfigPaths from "vite-tsconfig-paths";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import viteReact from "@vitejs/plugin-react";
+import { cloudflare } from "@cloudflare/vite-plugin";
+import { fileURLToPath } from "node:url";
 
-export default defineConfig();
+export default defineConfig(({ command }) => {
+  const plugins: PluginOption[] = [
+    tailwindcss(),
+    tsConfigPaths({ projects: ["./tsconfig.json"] }),
+  ];
+
+  // Le plugin Cloudflare ne sert qu'à produire le build déployable.
+  if (command === "build") {
+    plugins.push(cloudflare({ viteEnvironment: { name: "ssr" } }));
+  }
+
+  plugins.push(tanstackStart(), viteReact());
+
+  return {
+    plugins,
+    resolve: {
+      alias: {
+        "@": fileURLToPath(new URL("./src", import.meta.url)),
+      },
+      dedupe: [
+        "react",
+        "react-dom",
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime",
+        "@tanstack/react-query",
+        "@tanstack/query-core",
+      ],
+    },
+    server: {
+      host: "::",
+      port: 8080,
+    },
+  };
+});

@@ -1,63 +1,88 @@
-# SalubApp 🇨🇮🇸🇳🇨🇲
+# SalubApp 🇨🇮
 
-Plateforme citoyenne **mobile-first** pour signaler les problèmes d'**insalubrité** et d'**incivisme** dans les villes d'Afrique francophone.
+Plateforme citoyenne **mobile-first** pour signaler les problèmes d'**insalubrité**, de **voirie** et de **chantiers** dans le Grand Abidjan.
+
+> Version indépendante : ce projet ne dépend plus de Lovable. Il tourne sur **Supabase** (base de données, auth, stockage, fonctions) et l'**API Google Gemini** (analyse des photos).
 
 ## ✨ Fonctionnalités
 
-- 📱 **Connexion par SMS** (numéro de téléphone + code OTP)
-- 📸 **Signalement** avec photo et géolocalisation GPS
-- 🗺️ **Carte interactive** (OpenStreetMap + Leaflet) de tous les signalements
-- 👍 **Vote citoyen** : soutenez les signalements importants
-- 🛡️ **Tableau de bord autorité** : suivi des statuts (nouveau / en cours / résolu / rejeté)
-- 📊 **Export CSV** des signalements
-- 🇫🇷 **100 % en français**
+- 🕶️ **Mode anonyme** : aucune inscription, aucun email, aucun téléphone
+- 📸 **Signalement** avec photo + GPS (limité à la zone d'Abidjan)
+- 🙈 **Floutage automatique des visages** sur l'appareil (MediaPipe) avant envoi
+- 🤖 **Analyse IA de la photo** (Gemini) : catégorie + description proposées, photos hors sujet refusées
+- 🗺️ **Carte interactive** + carte de chaleur (Leaflet + OpenStreetMap)
+- 👍 **Votes**, vérification communautaire (vrai/faux, persistant/résolu), **commentaires modérés**
+- 🛡️ **Tableau de bord autorité** (`/dashboard`) : statuts + export CSV
+- 🔑 **Espace admin** (`/administrator_app`) : modération signalements / commentaires / avis
 
 ## 🧱 Stack
 
-- **Frontend** : React 19 + TanStack Start + Vite + Tailwind v4 + shadcn/ui
-- **Backend** : Lovable Cloud (Postgres + Auth + Storage managés)
-- **Carte** : Leaflet + OpenStreetMap (sans clé API)
+| Couche | Outils |
+|---|---|
+| Frontend | React 19, TanStack Start, Vite 7, Tailwind v4, shadcn/ui |
+| Backend | Supabase (Postgres + RLS, Auth anonyme, Storage, Edge Functions) |
+| IA | Google Gemini 2.5 Flash (endpoint compatible OpenAI) |
+| Carte | Leaflet + OpenStreetMap (sans clé API) |
+| Hébergement | Cloudflare Workers (`wrangler.jsonc`) — ou tout hébergeur compatible |
 
-## ⚙️ Configuration requise
+## 🚀 Démarrer en local
 
-### 1. Activer la connexion par SMS
-
-1. Ouvrir **Lovable Cloud → Users → Authentication Settings → Phone**
-2. Activer le provider **Phone**
-3. Renseigner les credentials d'un fournisseur SMS (Twilio, Messagebird, Vonage…)
-4. Désactiver la confirmation par e-mail (non utilisée ici)
-
-### 2. Promouvoir un compte autorité
-
-Par défaut, chaque nouvel utilisateur est `citoyen`. Pour donner accès au tableau de bord :
-
-```sql
-INSERT INTO public.user_roles (user_id, role) VALUES ('<uuid-utilisateur>', 'autorite');
+```bash
+npm install
+cp .env.example .env      # puis remplir avec vos clés Supabase
+npm run dev               # http://localhost:8080
 ```
 
-## 🚀 Déploiement
+> Sous Windows PowerShell, utilisez `npm.cmd` / `npx.cmd` si `npm` est bloqué.
 
-Cliquer sur **Publish** dans l'éditeur Lovable. L'application est servie sur un sous-domaine `*.lovable.app` (HTTPS, CDN global).
+## 🗄️ Mettre en place Supabase (une seule fois)
+
+1. Créer un projet sur [supabase.com](https://supabase.com).
+2. Lier le projet et créer les tables :
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref <ref-du-projet>
+   npx supabase db push
+   ```
+3. Activer la connexion anonyme : **Authentication → Sign In / Providers → Allow anonymous sign-ins**.
+4. Déployer la fonction IA avec une clé Gemini ([aistudio.google.com](https://aistudio.google.com/apikey)) :
+   ```bash
+   npx supabase secrets set GEMINI_API_KEY=<votre-cle>
+   npx supabase functions deploy classify-image
+   ```
+5. Créer le compte administrateur : **Authentication → Users → Add user** (email + mot de passe, cocher *Auto confirm*), puis dans le **SQL Editor** :
+   ```sql
+   INSERT INTO public.user_roles (user_id, role)
+   SELECT id, 'admin' FROM auth.users WHERE email = 'votre@email.com';
+   ```
+   Pour un compte autorité (tableau de bord), même requête avec `'autorite'`.
 
 ## 📐 Modèle de données
 
-- `reports` — signalements (catégorie, description, photo, GPS, statut, votes)
-- `report_votes` — un vote par citoyen / signalement
+- `reports` — signalements (catégorie, description, photo, GPS, statut, compteurs)
+- `reports_public` — vue publique (coordonnées arrondies, sans `user_id`)
+- `report_votes` — un vote par utilisateur / signalement
+- `report_verifications` — vérification communautaire (`veracite` / `persistance`)
+- `report_comments` — commentaires, visibles après approbation admin
+- `app_feedback` — avis sur l'application (lisibles par l'admin)
 - `user_roles` — rôle (`citoyen`, `autorite`, `admin`)
-- Bucket `report-photos` — stockage public des photos
+- Bucket `report-photos` — photos des signalements
 
 Toutes les tables sont protégées par **Row-Level Security**.
 
 ## 🧭 Routes
 
-- `/` — fil public + carte
-- `/login` — connexion par SMS
-- `/signaler` — formulaire de signalement (auth requise)
-- `/dashboard` — tableau de bord autorité (rôle requis)
+| Route | Rôle |
+|---|---|
+| `/` | Fil public des signalements |
+| `/carte` | Carte + carte de chaleur |
+| `/login` | Entrée en mode anonyme |
+| `/signaler` | Nouveau signalement |
+| `/dashboard` | Tableau de bord autorité |
+| `/administrator_app` | Administration |
+| `/avis` | Donner son avis sur l'app |
+| `/confidentialite` | Politique de confidentialité |
 
-## 🌍 Optimisations Afrique
+## 📜 Origine
 
-- Photos lazy-loadées et compressées côté navigateur
-- Géolocalisation tolérante (timeout 15 s, cache 1 min)
-- UI gros boutons, peu de texte technique
-- Indicatifs internationaux gérés (+225, +221, +237…)
+Projet initialement créé sur Lovable par nanashi-2K1 ([dépôt d'origine](https://github.com/nanashi-2K1/mon-quartier-propre)), puis rendu indépendant.

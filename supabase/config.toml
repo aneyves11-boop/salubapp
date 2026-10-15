@@ -1,1 +1,8 @@
-project_id = "ymgrvazeegpddjuoamyy"
+project_id = "salubapp"
+
+[auth]
+# L'application fonctionne en mode anonyme (aucune inscription demandée)
+enable_anonymous_sign_ins = true
+
+[functions.classify-image]
+verify_jwt = true

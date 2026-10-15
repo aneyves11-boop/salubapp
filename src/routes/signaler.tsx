@@ -10,11 +10,20 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { toast } from "sonner";
-import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon } from "lucide-react";
+import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon, AlertTriangle, ThumbsUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { blurFacesInImage, manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
-import { isInAbidjan } from "@/lib/abidjan";
+import { manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
+import { isInAbidjan, calculateDistanceMeters, formatDistance } from "@/lib/abidjan";
 import { classifyImageServerFn } from "@/lib/classify-image-fn";
+
+type NearbyDuplicate = {
+  id: string;
+  category: Category;
+  description: string;
+  photo_url: string | null;
+  distance: number;
+  votes_count: number;
+};
 
 export const Route = createFileRoute("/signaler")({
   head: () => ({ meta: [{ title: "Nouveau signalement — SalubApp" }] }),
@@ -37,10 +46,82 @@ function SignalerPage() {
   const [blurring, setBlurring] = useState(false);
   const [facesBlurred, setFacesBlurred] = useState<number | null>(null);
   const [imageRejected, setImageRejected] = useState<string | null>(null);
+  const [nearbyDuplicate, setNearbyDuplicate] = useState<NearbyDuplicate | null>(null);
+  const [duplicateIgnored, setDuplicateIgnored] = useState(false);
+  const [confirmingDuplicate, setConfirmingDuplicate] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) navigate({ to: "/login" });
   }, [user, authLoading, navigate]);
+
+  // Détection en temps réel des signalements identiques existants dans un rayon de 100m
+  useEffect(() => {
+    if (!coords || !category || duplicateIgnored) return;
+
+    let isMounted = true;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("reports")
+          .select("id, category, description, photo_url, latitude, longitude, votes_count, status")
+          .eq("category", category)
+          .neq("status", "resolu")
+          .limit(30);
+
+        if (!data || data.length === 0 || !isMounted) return;
+
+        let closest: NearbyDuplicate | null = null;
+        let minD = 100; // Rayon de 100 mètres max
+
+        for (const rep of data) {
+          if (!rep.latitude || !rep.longitude) continue;
+          const d = calculateDistanceMeters(coords.lat, coords.lng, rep.latitude, rep.longitude);
+          if (d < minD) {
+            minD = d;
+            closest = {
+              id: rep.id,
+              category: rep.category as Category,
+              description: rep.description,
+              photo_url: rep.photo_url,
+              distance: Math.round(d),
+              votes_count: rep.votes_count,
+            };
+          }
+        }
+
+        if (isMounted) {
+          setNearbyDuplicate(closest);
+        }
+      } catch (err) {
+        console.warn("Erreur vérification doublons :", err);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [coords?.lat, coords?.lng, category, duplicateIgnored]);
+
+  const confirmDuplicate = async () => {
+    if (!user || !nearbyDuplicate) return;
+    setConfirmingDuplicate(true);
+    try {
+      const { error } = await supabase.from("report_votes").insert({
+        report_id: nearbyDuplicate.id,
+        user_id: user.id,
+      });
+      if (error && !error.message.includes("duplicate")) throw error;
+      toast.success(
+        "Merci ! Votre confirmation (+1) a été ajoutée au signalement existant.",
+        { description: "La mairie verra que plusieurs citoyens sont impactés." }
+      );
+      navigate({ to: "/" });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setConfirmingDuplicate(false);
+    }
+  };
 
   const askLocation = () => {
     if (!navigator.geolocation) { toast.error("Géolocalisation non disponible"); setGeoState("error"); return; }
@@ -261,6 +342,67 @@ function SignalerPage() {
               ))}
             </div>
           </Card>
+
+          {nearbyDuplicate && (
+            <Card className="border-2 border-amber-400 bg-amber-50/90 p-4 shadow-sm dark:border-amber-700 dark:bg-amber-950/50">
+              <div className="flex items-start gap-3">
+                <div className="rounded-full bg-amber-200 p-2 text-amber-800 dark:bg-amber-900 dark:text-amber-200 shrink-0">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div className="flex-1 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-amber-950 dark:text-amber-100 text-sm">
+                      Problème similaire déjà signalé à {formatDistance(nearbyDuplicate.distance)} !
+                    </h3>
+                    <Badge variant="outline" className="border-amber-400 text-amber-800 dark:text-amber-200">
+                      {formatDistance(nearbyDuplicate.distance)}
+                    </Badge>
+                  </div>
+                  <p className="text-amber-900 dark:text-amber-200 font-medium">
+                    « {nearbyDuplicate.description} »
+                  </p>
+                  {nearbyDuplicate.photo_url && (
+                    <img
+                      src={nearbyDuplicate.photo_url}
+                      alt="Photo existante"
+                      className="my-2 h-24 w-40 rounded-md object-cover border"
+                    />
+                  )}
+                  <p className="text-[11px] text-amber-800/90 dark:text-amber-300">
+                    Pour éviter les doublons et donner plus de poids à l'alerte auprès de la mairie, vous pouvez confirmer ce signalement existant (+1) plutôt que d'en créer un second.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 pt-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={confirmingDuplicate}
+                      onClick={confirmDuplicate}
+                      className="gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                    >
+                      {confirmingDuplicate ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ThumbsUp className="h-3.5 w-3.5" />
+                      )}
+                      Confirmer ce problème (+1)
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setNearbyDuplicate(null);
+                        setDuplicateIgnored(true);
+                      }}
+                      className="border-amber-300 bg-white/60 text-xs hover:bg-white dark:bg-black/30"
+                    >
+                      C'est un problème différent, continuer
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
 
           <Card className="p-4">
             <Label htmlFor="desc">Description</Label>

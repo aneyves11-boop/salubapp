@@ -25,3 +25,34 @@ export const ABIDJAN_LEAFLET_BOUNDS: [[number, number], [number, number]] = [
   [ABIDJAN_BOUNDS.minLat, ABIDJAN_BOUNDS.minLng],
   [ABIDJAN_BOUNDS.maxLat, ABIDJAN_BOUNDS.maxLng],
 ];
+
+/** Calcule la distance en mètres entre deux points GPS (Formule de Haversine) */
+export function calculateDistanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371e3; // Rayon moyen de la Terre en mètres
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const phi1 = toRad(lat1);
+  const phi2 = toRad(lat2);
+  const deltaPhi = toRad(lat2 - lat1);
+  const deltaLambda = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) *
+    Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
+/** Formate une distance en mètres de façon lisible ("350 m", "1.4 km") */
+export function formatDistance(meters: number): string {
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+  return `${(meters / 1000).toFixed(1)} km`;
+}

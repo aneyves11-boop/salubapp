@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { categoryImage, categoryLabel, statusInfo } from "@/lib/categories";
+import { formatDistance } from "@/lib/abidjan";
 import type { Database } from "@/integrations/supabase/types";
 import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench, MessageSquare, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,8 +15,8 @@ import { Link } from "@tanstack/react-router";
 type Report = Database["public"]["Tables"]["reports"]["Row"];
 type Comment = { id: string; content: string; created_at: string; user_id: string; approved: boolean };
 
-export function ReportCard({ report, hasVoted, onVoteChange }: {
-  report: Report; hasVoted: boolean; onVoteChange: () => void;
+export function ReportCard({ report, hasVoted, onVoteChange, distanceMeters }: {
+  report: Report; hasVoted: boolean; onVoteChange: () => void; distanceMeters?: number;
 }) {
   const { user } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -159,11 +160,35 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
           </div>
         </div>
         <p className="text-sm">{report.description}</p>
-        {report.ville && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="h-3 w-3" /> {report.ville}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {report.ville && (
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <MapPin className="h-3 w-3" /> {report.ville}
+            </div>
+          )}
+          {distanceMeters !== undefined && (
+            <Badge
+              variant="outline"
+              className={`gap-1 font-medium ${
+                distanceMeters < 500
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                  : distanceMeters < 2500
+                  ? "border-blue-400 bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200"
+                  : "text-muted-foreground"
+              }`}
+            >
+              <MapPin className="h-3 w-3 text-primary" />
+              {distanceMeters < 300
+                ? `Tout près (à ${formatDistance(distanceMeters)})`
+                : `À ${formatDistance(distanceMeters)}`}
+            </Badge>
+          )}
+          {report.votes_count > 0 && (
+            <Badge variant="secondary" className="gap-1 text-[11px] font-normal">
+              👍 {report.votes_count} citoyen{report.votes_count > 1 ? "s" : ""} confirme{report.votes_count > 1 ? "nt" : ""}
+            </Badge>
+          )}
+        </div>
 
         <div className="flex items-center gap-2 border-t pt-2 text-xs">
           <span className="text-muted-foreground">Vérification :</span>
@@ -196,7 +221,7 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
         <div className="flex items-center justify-between pt-2">
           <Button variant={hasVoted ? "default" : "outline"} size="sm" onClick={toggleVote} disabled={busy} className="gap-1">
             <ThumbsUp className="h-4 w-4" />
-            {report.votes_count} {hasVoted ? "Voté" : "Soutenir"}
+            {report.votes_count > 0 ? `${report.votes_count} ` : ""}{hasVoted ? "Confirmé" : "Je confirme (+1)"}
           </Button>
           <Link to="/" search={{}} className="text-xs text-muted-foreground hover:underline"
             onClick={(e) => {

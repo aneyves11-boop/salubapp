@@ -71,25 +71,11 @@ function SignalerPage() {
     setFacesBlurred(null);
     if (!file) { setPhoto(null); setPhotoPreview(null); return; }
     setImageRejected(null);
-    setBlurring(true);
-    try {
-      const { blob, facesDetected } = await blurFacesInImage(file);
-      const safeFile = new File([blob], file.name.replace(/\.\w+$/, "") + "-anon.jpg", { type: "image/jpeg" });
-      setPhoto(safeFile);
-      setPhotoPreview(URL.createObjectURL(safeFile));
-      if (facesDetected > 0) {
-        setFacesBlurred(facesDetected);
-        toast.success(`${facesDetected} visage${facesDetected > 1 ? "s" : ""} flouté${facesDetected > 1 ? "s" : ""} pour préserver la vie privée.`);
-      }
-      void analyzePhoto(safeFile, facesDetected);
-    } catch (e) {
-      toast.error("Traitement de l'image impossible", { description: (e as Error).message });
-      setPhoto(file);
-      setPhotoPreview(URL.createObjectURL(file));
-      void analyzePhoto(file, 0);
-    } finally {
-      setBlurring(false);
-    }
+
+    // Affiche directement la photo en aperçu et délègue la détection haute précision à l'IA
+    setPhoto(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    void analyzePhoto(file);
   };
 
   const handlePhotoClick = async (e: React.MouseEvent<HTMLImageElement>) => {
@@ -124,7 +110,7 @@ function SignalerPage() {
       reader.readAsDataURL(file);
     });
 
-  const analyzePhoto = async (file: File, initialFaces = 0) => {
+  const analyzePhoto = async (file: File) => {
     setAnalyzing(true);
     try {
       const imageBase64 = await fileToBase64(file);
@@ -132,19 +118,14 @@ function SignalerPage() {
         data: { imageBase64, mimeType: file.type || "image/jpeg" },
       });
 
-      let currentFile = file;
-      let totalFaces = initialFaces;
-
-      // 1. Floutage 100% AUTOMATIQUE par l'IA : couvre tous les visages, profils, casquettes ou personnes au loin
+      // 1. Floutage 100% AUTOMATIQUE par l'IA : ciblage chirurgical des visages uniquement
       if (result.faces && result.faces.length > 0) {
         try {
-          const autoBlurred = await blurBoxesOnImage(currentFile, result.faces);
+          const autoBlurred = await blurBoxesOnImage(file, result.faces);
           if (photoPreview) URL.revokeObjectURL(photoPreview);
-          currentFile = autoBlurred;
           setPhoto(autoBlurred);
           setPhotoPreview(URL.createObjectURL(autoBlurred));
-          totalFaces = Math.max(initialFaces, result.faces.length);
-          setFacesBlurred(totalFaces);
+          setFacesBlurred(result.faces.length);
           toast.success(
             `${result.faces.length} visage${result.faces.length > 1 ? "s" : ""} flouté${result.faces.length > 1 ? "s" : ""} automatiquement par l'IA !`
           );
@@ -152,7 +133,7 @@ function SignalerPage() {
           console.warn("Échec du floutage automatique IA :", blurErr);
         }
       } else {
-        setFacesBlurred(totalFaces);
+        setFacesBlurred(0);
       }
 
       if (result.error) {
@@ -197,7 +178,7 @@ function SignalerPage() {
       toast.error("Analyse IA impossible", {
         description: (e as Error).message,
       });
-      setFacesBlurred((prev) => prev ?? initialFaces);
+      setFacesBlurred((prev) => prev ?? 0);
     } finally {
       setAnalyzing(false);
     }

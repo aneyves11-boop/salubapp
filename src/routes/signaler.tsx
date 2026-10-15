@@ -14,6 +14,7 @@ import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon
 import { Badge } from "@/components/ui/badge";
 import { blurFacesInImage } from "@/lib/face-blur";
 import { isInAbidjan } from "@/lib/abidjan";
+import { classifyImageServerFn } from "@/lib/classify-image-fn";
 
 export const Route = createFileRoute("/signaler")({
   head: () => ({ meta: [{ title: "Nouveau signalement — SalubApp" }] }),
@@ -105,29 +106,52 @@ function SignalerPage() {
     setAnalyzing(true);
     try {
       const imageBase64 = await fileToBase64(file);
-      const { data, error } = await supabase.functions.invoke("classify-image", {
-        body: { imageBase64, mimeType: file.type || "image/jpeg" },
+      const result = await classifyImageServerFn({
+        data: { imageBase64, mimeType: file.type || "image/jpeg" },
       });
-      if (error) throw error;
-      const result = data as { is_relevant?: boolean; reason?: string; category: Category; description: string; confidence: number; error?: string };
-      if (result.error) throw new Error(result.error);
+
+      if (result.error) {
+        toast.error("Information IA", { description: result.error });
+        if (!result.category) return;
+      }
+
       if (result.is_relevant === false) {
-        const reason = result.reason || "Cette image ne semble pas montrer un problème de salubrité urbaine.";
+        const reason =
+          result.reason ||
+          "Cette image ne semble pas montrer un problème d'insalubrité urbaine ou de voirie.";
         setImageRejected(reason);
         setPhoto(null);
         if (photoPreview) URL.revokeObjectURL(photoPreview);
         setPhotoPreview(null);
         setAiSuggestion(null);
-        toast.error("Image refusée", { description: reason });
+        toast.error("Image refusée par l'IA", {
+          description: reason,
+          duration: 6000,
+        });
         return;
       }
-      setAiSuggestion({ category: result.category, confidence: result.confidence });
-      // Pré-remplit catégorie si vide, et description si vide
-      setCategory((prev) => prev ?? result.category);
-      setDescription((prev) => (prev.trim().length === 0 ? result.description : prev));
-      toast.success("Analyse IA terminée", { description: "Vérifiez et ajustez si besoin." });
+
+      if (result.category) {
+        setAiSuggestion({
+          category: result.category,
+          confidence: result.confidence ?? 0.9,
+        });
+        setCategory((prev) => prev ?? result.category!);
+      }
+
+      if (result.description) {
+        setDescription((prev) =>
+          prev.trim().length === 0 ? result.description! : prev
+        );
+      }
+
+      toast.success("Analyse IA terminée", {
+        description: "Vérifiez et ajustez si besoin.",
+      });
     } catch (e) {
-      toast.error("Analyse IA impossible", { description: (e as Error).message });
+      toast.error("Analyse IA impossible", {
+        description: (e as Error).message,
+      });
     } finally {
       setAnalyzing(false);
     }

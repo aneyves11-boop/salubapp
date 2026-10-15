@@ -12,7 +12,7 @@ import { CATEGORIES, type Category } from "@/lib/categories";
 import { toast } from "sonner";
 import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { blurFacesInImage } from "@/lib/face-blur";
+import { blurFacesInImage, manualBlurAtCoords } from "@/lib/face-blur";
 import { isInAbidjan } from "@/lib/abidjan";
 import { classifyImageServerFn } from "@/lib/classify-image-fn";
 
@@ -86,6 +86,27 @@ function SignalerPage() {
       toast.error("Traitement de l'image impossible", { description: (e as Error).message });
       setPhoto(file);
       setPhotoPreview(URL.createObjectURL(file));
+    } finally {
+      setBlurring(false);
+    }
+  };
+
+  const handlePhotoClick = async (e: React.MouseEvent<HTMLImageElement>) => {
+    if (!photo) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+
+    setBlurring(true);
+    try {
+      const blurred = await manualBlurAtCoords(photo, x, y);
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+      setPhoto(blurred);
+      setPhotoPreview(URL.createObjectURL(blurred));
+      setFacesBlurred((prev) => (prev ? prev + 1 : 1));
+      toast.success("Zone floutée avec succès !");
+    } catch {
+      toast.error("Impossible de flouter cette zone");
     } finally {
       setBlurring(false);
     }
@@ -286,7 +307,17 @@ function SignalerPage() {
               </div>
             )}
             {photoPreview && (
-              <img src={photoPreview} alt="Aperçu" className="mt-3 max-h-60 w-full rounded-lg object-cover" />
+              <div className="relative mt-3">
+                <img
+                  src={photoPreview}
+                  alt="Aperçu (touchez pour flouter)"
+                  onClick={handlePhotoClick}
+                  className="max-h-60 w-full cursor-crosshair rounded-lg object-cover ring-1 ring-border hover:ring-primary"
+                />
+                <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+                  👆 <strong>Astuce :</strong> Touchez directement la photo pour flouter manuellement un visage ou une zone.
+                </p>
+              </div>
             )}
             {photo && (
               <div className="mt-3 flex items-center justify-between gap-2">

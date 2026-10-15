@@ -6,21 +6,15 @@ import tailwindcss from "@tailwindcss/vite";
 import tsConfigPaths from "vite-tsconfig-paths";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
-import { cloudflare } from "@cloudflare/vite-plugin";
 import { fileURLToPath } from "node:url";
 
-export default defineConfig(({ command }) => {
+export default defineConfig(() => {
   const plugins: PluginOption[] = [
     tailwindcss(),
     tsConfigPaths({ projects: ["./tsconfig.json"] }),
+    tanstackStart(),
+    viteReact(),
   ];
-
-  // Le plugin Cloudflare ne sert qu'à produire le build déployable.
-  if (command === "build") {
-    plugins.push(cloudflare({ viteEnvironment: { name: "ssr" } }));
-  }
-
-  plugins.push(tanstackStart(), viteReact());
 
   return {
     plugins,

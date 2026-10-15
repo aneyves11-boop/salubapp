@@ -84,43 +84,69 @@ Réponds STRICTEMENT avec un objet JSON respectant ce schéma :
   "faces": [[ymin, xmin, ymax, xmax]]
 }`;
 
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: prompt },
+const CANDIDATE_MODELS = [
+  "gemini-flash-lite-latest",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-flash-lite",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-flash-latest",
+];
+
+      let lastStatus = 0;
+      let lastErrorText = "";
+      let json: any = null;
+
+      for (const model of CANDIDATE_MODELS) {
+        try {
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [
                   {
-                    inline_data: {
-                      mime_type: mimeType,
-                      data: imageBase64,
-                    },
+                    parts: [
+                      { text: prompt },
+                      {
+                        inline_data: {
+                          mime_type: mimeType,
+                          data: imageBase64,
+                        },
+                      },
+                    ],
                   },
                 ],
-              },
-            ],
-            generationConfig: {
-              response_mime_type: "application/json",
-              temperature: 0.1,
-            },
-          }),
-        }
-      );
+                generationConfig: {
+                  response_mime_type: "application/json",
+                  temperature: 0.1,
+                },
+              }),
+            }
+          );
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Gemini API error:", res.status, errorText);
+          if (res.ok) {
+            json = await res.json();
+            break;
+          }
+
+          lastStatus = res.status;
+          lastErrorText = await res.text();
+          console.warn(`Model ${model} returned ${res.status}, trying fallback...`);
+        } catch (callErr) {
+          console.warn(`Model ${model} network error, trying fallback...`, callErr);
+        }
+      }
+
+      if (!json) {
+        console.error("All Gemini models failed:", lastStatus, lastErrorText);
         return {
           is_relevant: true,
-          error: `Erreur API Gemini (${res.status}). Vérifiez le quota de votre clé.`,
+          error: `Service IA temporairement indisponible (${lastStatus || 429}).`,
         };
       }
 
-      const json = await res.json();
       const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!rawText) {
         return { is_relevant: true, error: "Réponse vide de l'IA" };
@@ -129,6 +155,17 @@ Réponds STRICTEMENT avec un objet JSON respectant ce schéma :
       const parsed = JSON.parse(rawText) as ClassificationResult;
       if (parsed.category && !VALID_CATEGORIES.includes(parsed.category as any)) {
         parsed.category = "autre";
+      }
+
+      if (Array.isArray(parsed.faces)) {
+        parsed.faces = parsed.faces.filter(
+          (b) =>
+            Array.isArray(b) &&
+            b.length === 4 &&
+            b.every((n) => typeof n === "number" && !isNaN(n))
+        );
+      } else {
+        parsed.faces = [];
       }
 
       return parsed;

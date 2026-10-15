@@ -77,15 +77,16 @@ function SignalerPage() {
       const safeFile = new File([blob], file.name.replace(/\.\w+$/, "") + "-anon.jpg", { type: "image/jpeg" });
       setPhoto(safeFile);
       setPhotoPreview(URL.createObjectURL(safeFile));
-      setFacesBlurred(facesDetected);
       if (facesDetected > 0) {
+        setFacesBlurred(facesDetected);
         toast.success(`${facesDetected} visage${facesDetected > 1 ? "s" : ""} flouté${facesDetected > 1 ? "s" : ""} pour préserver la vie privée.`);
       }
-      void analyzePhoto(safeFile);
+      void analyzePhoto(safeFile, facesDetected);
     } catch (e) {
       toast.error("Traitement de l'image impossible", { description: (e as Error).message });
       setPhoto(file);
       setPhotoPreview(URL.createObjectURL(file));
+      void analyzePhoto(file, 0);
     } finally {
       setBlurring(false);
     }
@@ -123,13 +124,36 @@ function SignalerPage() {
       reader.readAsDataURL(file);
     });
 
-  const analyzePhoto = async (file: File) => {
+  const analyzePhoto = async (file: File, initialFaces = 0) => {
     setAnalyzing(true);
     try {
       const imageBase64 = await fileToBase64(file);
       const result = await classifyImageServerFn({
         data: { imageBase64, mimeType: file.type || "image/jpeg" },
       });
+
+      let currentFile = file;
+      let totalFaces = initialFaces;
+
+      // 1. Floutage 100% AUTOMATIQUE par l'IA : couvre tous les visages, profils, casquettes ou personnes au loin
+      if (result.faces && result.faces.length > 0) {
+        try {
+          const autoBlurred = await blurBoxesOnImage(currentFile, result.faces);
+          if (photoPreview) URL.revokeObjectURL(photoPreview);
+          currentFile = autoBlurred;
+          setPhoto(autoBlurred);
+          setPhotoPreview(URL.createObjectURL(autoBlurred));
+          totalFaces = Math.max(initialFaces, result.faces.length);
+          setFacesBlurred(totalFaces);
+          toast.success(
+            `${result.faces.length} visage${result.faces.length > 1 ? "s" : ""} flouté${result.faces.length > 1 ? "s" : ""} automatiquement par l'IA !`
+          );
+        } catch (blurErr) {
+          console.warn("Échec du floutage automatique IA :", blurErr);
+        }
+      } else {
+        setFacesBlurred(totalFaces);
+      }
 
       if (result.error) {
         toast.error("Information IA", { description: result.error });
@@ -166,22 +190,6 @@ function SignalerPage() {
         );
       }
 
-      // Floutage 100% AUTOMATIQUE par l'IA : couvre tous les visages, profils, casquettes ou personnes au loin
-      if (result.faces && result.faces.length > 0) {
-        try {
-          const autoBlurred = await blurBoxesOnImage(file, result.faces);
-          if (photoPreview) URL.revokeObjectURL(photoPreview);
-          setPhoto(autoBlurred);
-          setPhotoPreview(URL.createObjectURL(autoBlurred));
-          setFacesBlurred(result.faces.length);
-          toast.success(
-            `${result.faces.length} visage${result.faces.length > 1 ? "s" : ""} flouté${result.faces.length > 1 ? "s" : ""} automatiquement par l'IA !`
-          );
-        } catch (blurErr) {
-          console.warn("Échec du floutage automatique IA :", blurErr);
-        }
-      }
-
       toast.success("Analyse IA terminée", {
         description: "Vérifiez et ajustez si besoin.",
       });
@@ -189,6 +197,7 @@ function SignalerPage() {
       toast.error("Analyse IA impossible", {
         description: (e as Error).message,
       });
+      setFacesBlurred((prev) => prev ?? initialFaces);
     } finally {
       setAnalyzing(false);
     }
@@ -306,14 +315,20 @@ function SignalerPage() {
             <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
               <ShieldCheck className="h-3 w-3" /> Les visages sont automatiquement floutés sur votre appareil avant l'envoi.
             </p>
-            {blurring && (
-              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyse de confidentialité…
+            {(blurring || analyzing) && (
+              <div className="mt-2 flex items-center gap-2 text-xs font-medium text-primary">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyse IA & floutage automatique des visages en cours…
               </div>
             )}
-            {facesBlurred !== null && !blurring && (
-              <div className="mt-2 text-xs text-emerald-700">
-                {facesBlurred === 0 ? "Aucun visage détecté." : `${facesBlurred} visage(s) flouté(s).`}
+            {facesBlurred !== null && !blurring && !analyzing && (
+              <div className="mt-2 flex items-center gap-1.5 text-xs">
+                {facesBlurred === 0 ? (
+                  <span className="text-muted-foreground">Aucun visage détecté dans cette photo.</span>
+                ) : (
+                  <span className="font-medium text-emerald-700">
+                    🛡️ {facesBlurred} visage{facesBlurred > 1 ? "s" : ""} flouté{facesBlurred > 1 ? "s" : ""} automatiquement pour préserver la vie privée.
+                  </span>
+                )}
               </div>
             )}
             {imageRejected && (

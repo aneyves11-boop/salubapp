@@ -10,15 +10,31 @@ async function getDetector(): Promise<FaceDetector> {
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm"
       );
-      return FaceDetector.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
-          delegate: "GPU",
-        },
-        runningMode: "IMAGE",
-        minDetectionConfidence: 0.5,
-      });
+
+      // Tente d'abord avec le GPU, et bascule sur le CPU si non supporté sur mobile
+      try {
+        return await FaceDetector.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+            delegate: "GPU",
+          },
+          runningMode: "IMAGE",
+          // Seuil abaissé à 0.22 pour détecter les profils, les têtes penchées et les personnes avec casquette/chapeau
+          minDetectionConfidence: 0.22,
+        });
+      } catch (gpuErr) {
+        console.warn("GPU delegate non disponible, bascule sur CPU:", gpuErr);
+        return await FaceDetector.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+            delegate: "CPU",
+          },
+          runningMode: "IMAGE",
+          minDetectionConfidence: 0.22,
+        });
+      }
     })();
   }
   return detectorPromise;
@@ -34,11 +50,27 @@ export interface BlurResult {
 /** Détecte les visages et retourne une nouvelle image avec floutage appliqué. */
 export async function blurFacesInImage(file: File): Promise<BlurResult> {
   const bitmap = await createImageBitmap(file);
+
+  // Redimensionne proportionnellement si l'image dépasse 1920px (améliore la détection et réduit l'usage mémoire sur mobile)
+  const MAX_DIM = 1920;
+  let targetWidth = bitmap.width;
+  let targetHeight = bitmap.height;
+
+  if (targetWidth > MAX_DIM || targetHeight > MAX_DIM) {
+    if (targetWidth > targetHeight) {
+      targetHeight = Math.round((targetHeight * MAX_DIM) / targetWidth);
+      targetWidth = MAX_DIM;
+    } else {
+      targetWidth = Math.round((targetWidth * MAX_DIM) / targetHeight);
+      targetHeight = MAX_DIM;
+    }
+  }
+
   const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
   const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(bitmap, 0, 0);
+  ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
 
   let facesDetected = 0;
   try {
@@ -49,20 +81,22 @@ export async function blurFacesInImage(file: File): Promise<BlurResult> {
     for (const det of result.detections) {
       const bb = det.boundingBox;
       if (!bb) continue;
-      // Élargit légèrement pour bien couvrir tête + cheveux
-      const pad = 0.25;
+
+      // Élargit le cadre (pad 35%) pour bien couvrir toute la tête, les cheveux, la barbe et la casquette
+      const pad = 0.35;
       const x = Math.max(0, bb.originX - bb.width * pad);
       const y = Math.max(0, bb.originY - bb.height * pad);
       const w = Math.min(canvas.width - x, bb.width * (1 + 2 * pad));
       const h = Math.min(canvas.height - y, bb.height * (1 + 2 * pad));
 
-      // Floutage : on extrait la zone, on la dessine très réduite puis ré-agrandie
+      // Floutage mosaïque fort et flou gaussien
       const tmp = document.createElement("canvas");
-      const scale = 0.05;
+      const scale = 0.04; // Zone encore plus pixellisée/floutée pour garantir l'anonymat
       tmp.width = Math.max(1, Math.floor(w * scale));
       tmp.height = Math.max(1, Math.floor(h * scale));
       const tctx = tmp.getContext("2d")!;
       tctx.drawImage(canvas, x, y, w, h, 0, 0, tmp.width, tmp.height);
+
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, x, y, w, h);
     }

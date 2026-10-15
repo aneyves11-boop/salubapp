@@ -180,3 +180,35 @@ export async function manualBlurAtCoords(
 
   return new File([blob], file.name, { type: "image/jpeg" });
 }
+
+/** Floute automatiquement une liste de boîtes [ymin, xmin, ymax, xmax] normalisées de 0 à 1000 détectées par l'IA */
+export async function blurBoxesOnImage(
+  file: File,
+  boxes: Array<[number, number, number, number]>
+): Promise<File> {
+  if (!boxes || boxes.length === 0) return file;
+
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0);
+
+  for (const [ymin, xmin, ymax, xmax] of boxes) {
+    const x = (xmin / 1000) * canvas.width;
+    const y = (ymin / 1000) * canvas.height;
+    const w = Math.max(20, ((xmax - xmin) / 1000) * canvas.width);
+    const h = Math.max(20, ((ymax - ymin) / 1000) * canvas.height);
+
+    applyBlurToCanvas(ctx, canvas, { x, y, w, h });
+  }
+
+  const blob: Blob = await new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/jpeg", 0.85)
+  );
+  bitmap.close();
+
+  return new File([blob], file.name, { type: "image/jpeg" });
+}
+

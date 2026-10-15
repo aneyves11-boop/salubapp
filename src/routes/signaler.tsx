@@ -12,7 +12,7 @@ import { CATEGORIES, type Category } from "@/lib/categories";
 import { toast } from "sonner";
 import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { blurFacesInImage, manualBlurAtCoords } from "@/lib/face-blur";
+import { blurFacesInImage, manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
 import { isInAbidjan } from "@/lib/abidjan";
 import { classifyImageServerFn } from "@/lib/classify-image-fn";
 
@@ -164,6 +164,22 @@ function SignalerPage() {
         setDescription((prev) =>
           prev.trim().length === 0 ? result.description! : prev
         );
+      }
+
+      // Floutage 100% AUTOMATIQUE par l'IA : couvre tous les visages, profils, casquettes ou personnes au loin
+      if (result.faces && result.faces.length > 0) {
+        try {
+          const autoBlurred = await blurBoxesOnImage(file, result.faces);
+          if (photoPreview) URL.revokeObjectURL(photoPreview);
+          setPhoto(autoBlurred);
+          setPhotoPreview(URL.createObjectURL(autoBlurred));
+          setFacesBlurred(result.faces.length);
+          toast.success(
+            `${result.faces.length} visage${result.faces.length > 1 ? "s" : ""} flouté${result.faces.length > 1 ? "s" : ""} automatiquement par l'IA !`
+          );
+        } catch (blurErr) {
+          console.warn("Échec du floutage automatique IA :", blurErr);
+        }
       }
 
       toast.success("Analyse IA terminée", {

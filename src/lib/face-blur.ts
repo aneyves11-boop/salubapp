@@ -54,7 +54,7 @@ export interface BlurResult {
 type Box = { x: number; y: number; w: number; h: number };
 
 function applyBlurToCanvas(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, box: Box) {
-  const pad = 0.4;
+  const pad = 0.08;
   const x = Math.max(0, box.x - box.w * pad);
   const y = Math.max(0, box.y - box.h * pad);
   const w = Math.min(canvas.width - x, box.w * (1 + 2 * pad));
@@ -195,11 +195,17 @@ export async function blurBoxesOnImage(
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(bitmap, 0, 0);
 
-  for (const [ymin, xmin, ymax, xmax] of boxes) {
+  for (let [ymin, xmin, ymax, xmax] of boxes) {
+    const boxHeight = ymax - ymin;
+    // Sécurité garde-fou : si la boîte dépasse 25% de la hauteur de l'image, c'est le corps entier : on ne garde que la tête (25% supérieurs)
+    if (boxHeight > 250) {
+      ymax = Math.round(ymin + boxHeight * 0.25);
+    }
+
     const x = (xmin / 1000) * canvas.width;
     const y = (ymin / 1000) * canvas.height;
-    const w = Math.max(20, ((xmax - xmin) / 1000) * canvas.width);
-    const h = Math.max(20, ((ymax - ymin) / 1000) * canvas.height);
+    const w = Math.max(15, ((xmax - xmin) / 1000) * canvas.width);
+    const h = Math.max(15, ((ymax - ymin) / 1000) * canvas.height);
 
     applyBlurToCanvas(ctx, canvas, { x, y, w, h });
   }

@@ -69,10 +69,11 @@ Si et seulement si l'image montre un problème urbain réel, mets "is_relevant":
 - "fuite_sodeci" : Fuite d'eau potable sur canalisations publiques
 - "autre" : Autre insalubrité urbaine réelle
 
-3. DÉTECTION DE VISAGES (CONFIDENTIALITÉ AUTOMATIQUE) :
-Repère TOUS les visages ou têtes de personnes humaines visibles dans l'image (qu'ils soient de face, de profil, de trois-quarts, portant une casquette/chapeau, ou situés au loin).
-Pour chaque visage ou tête, donne sa boîte englobante [ymin, xmin, ymax, xmax] avec des entiers normalisés entre 0 et 1000.
-Si aucun visage n'est visible, renvoie un tableau vide [].
+3. DÉTECTION STRICTE DES TÊTES / VISAGES (CONFIDENTIALITÉ) :
+Détecte UNIQUEMENT la zone de la tête et du visage de chaque personne humaine visible (du sommet de la tête/chapeau jusqu'au menton).
+ATTENTION ABSOLUE : N'englobe JAMAIS le cou, le torse, les bras, les jambes ou le corps de la personne ! Uniquement la boîte englobante serrée de la tête/visage.
+Pour chaque tête/visage, donne sa boîte englobante serrée [ymin, xmin, ymax, xmax] avec des entiers normalisés de 0 à 1000.
+Si aucune personne ou tête n'est visible, renvoie un tableau vide [].
 
 Réponds STRICTEMENT avec un objet JSON respectant ce schéma :
 {

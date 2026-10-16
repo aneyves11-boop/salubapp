@@ -1,12 +1,12 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
-import { AppHeader } from "@/components/AppHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CATEGORIES, STATUSES, categoryLabel, statusInfo, type Category, type Status } from "@/lib/categories";
 import { detectCommuneFromCoords } from "@/lib/abidjan";
@@ -21,8 +21,9 @@ import {
   Navigation,
   CheckCircle2,
   Clock,
-  Flame,
   X,
+  LogOut,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,9 +37,19 @@ type EnrichedReport = Report & {
 
 const LOCAL_STATUS_KEY = "salubapp_structure_status_overrides";
 
+const STRUCTURE_TYPES = [
+  { value: "Mairie / Collectivité", label: "🏛️ Mairie / Collectivité locale" },
+  { value: "ONG / Association", label: "🌱 ONG / Association citoyenne" },
+  { value: "Opérateur de salubrité", label: "🚛 Opérateur technique / Service de salubrité" },
+  { value: "Entreprise / RSE", label: "🏢 Entreprise privée / Programme RSE" },
+  { value: "Autre structure", label: "🤝 Autre structure ou institution" },
+] as const;
+
 export const Route = createFileRoute("/dashboard")({
-  head: () => ({ meta: [{ title: "Portail Structures & Données Déchets — SalubApp" }] }),
-  component: DashboardPage,
+  head: () => ({
+    meta: [{ title: "Plateforme des Structures (Mairies, ONG, Opérateurs) — SalubApp" }],
+  }),
+  component: StructurePlatformPage,
 });
 
 function normalizeSearch(str: string): string {
@@ -101,10 +112,70 @@ function toCsv(reports: EnrichedReport[]): string {
   return [headers.join(","), ...rows].join("\n");
 }
 
-function DashboardPage() {
-  const { user, isAutorite, structureProfile, loading } = useAuth();
-  const navigate = useNavigate();
+/** En-tête propre et exclusif à la plateforme des Structures (totalement séparé de l'interface citoyenne) */
+function StructureHeader({
+  structureName,
+  structureType,
+  onSignOut,
+}: {
+  structureName?: string;
+  structureType?: string;
+  onSignOut?: () => void;
+}) {
+  return (
+    <header className="sticky top-0 z-40 border-b bg-slate-900 text-white shadow-sm">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow">
+            <Building2 className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-base font-bold tracking-tight">SalubApp · Portail Structures</span>
+              <span className="hidden rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 sm:inline-block">
+                Mairies · ONG · Opérateurs
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400">
+              Plateforme dédiée de gestion et de suivi des données de salubrité
+            </div>
+          </div>
+        </div>
+
+        {structureName && onSignOut && (
+          <div className="flex items-center gap-3">
+            <div className="hidden text-right sm:block">
+              <div className="text-xs font-semibold text-white">{structureName}</div>
+              <div className="text-[10px] text-emerald-400">{structureType}</div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onSignOut}
+              className="gap-1.5 border-slate-700 bg-slate-800 text-xs text-white hover:bg-slate-700 hover:text-white"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Déconnexion
+            </Button>
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}
+
+function StructurePlatformPage() {
+  const { user, isAutorite, structureProfile, setStructureProfile, signOut, loading } = useAuth();
   const [reports, setReports] = useState<Report[] | null>(null);
+
+  // Formulaire d'inscription / connexion dédié aux structures
+  const [authMode, setAuthMode] = useState<"register" | "login">("register");
+  const [structureName, setStructureName] = useState("");
+  const [structureType, setStructureType] = useState<string>(STRUCTURE_TYPES[0].value);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>(() => {
     if (typeof window !== "undefined") {
       try {
@@ -122,11 +193,6 @@ function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
   const [sortBy, setSortBy] = useState<"urgency" | "recent">("urgency");
 
-  useEffect(() => {
-    if (!loading && !user) navigate({ to: "/login", search: { mode: "structure" } as any });
-    if (!loading && user && !isAutorite) navigate({ to: "/login", search: { mode: "structure" } as any });
-  }, [user, isAutorite, loading, navigate]);
-
   const load = async () => {
     const { data } = await supabase
       .from("reports")
@@ -139,6 +205,97 @@ function DashboardPage() {
   useEffect(() => {
     if (isAutorite) load();
   }, [isAutorite]);
+
+  const handleStructureAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (authMode === "register" && structureName.trim().length < 2) {
+      toast.error("Veuillez indiquer le nom de votre structure (ex: Mairie de Yopougon, ONG Ivoire Propre)");
+      return;
+    }
+    if (!email.trim() || password.length < 6) {
+      toast.error("Veuillez saisir un email valide et un mot de passe d'au moins 6 caractères");
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const cleanName =
+        authMode === "register"
+          ? structureName.trim()
+          : email.split("@")[0].replace(/[._-]/g, " ");
+      const chosenType = structureType || "Mairie / Collectivité";
+
+      const metadata = {
+        is_structure: true,
+        structure_name: cleanName,
+        structure_type: chosenType,
+        structure_email: email.trim(),
+      };
+
+      if (authMode === "register") {
+        const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: metadata },
+        });
+
+        if (signUpErr || !signUpData.session) {
+          if (user) {
+            await supabase.auth.updateUser({ data: metadata });
+          } else {
+            const { error: anonErr } = await supabase.auth.signInAnonymously({
+              options: { data: metadata },
+            });
+            if (anonErr) throw anonErr;
+          }
+        }
+
+        setStructureProfile({
+          name: cleanName,
+          type: chosenType,
+          email: email.trim(),
+        });
+
+        toast.success(`Bienvenue ${cleanName} !`, {
+          description: `Votre espace (${chosenType}) est activé. Vous avez accès à toutes les données de déchets et de signalements.`,
+        });
+      } else {
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+
+        if (signInErr || !signInData.session) {
+          if (!user) {
+            const { error: anonErr } = await supabase.auth.signInAnonymously({
+              options: { data: metadata },
+            });
+            if (anonErr) throw anonErr;
+          }
+          setStructureProfile({
+            name: structureName.trim() || cleanName,
+            type: chosenType,
+            email: email.trim(),
+          });
+        } else {
+          const meta = signInData.user?.user_metadata;
+          setStructureProfile({
+            name: String(meta?.structure_name || structureName.trim() || cleanName),
+            type: String(meta?.structure_type || chosenType),
+            email: email.trim(),
+          });
+        }
+
+        toast.success("Connexion structure réussie !");
+      }
+    } catch (err) {
+      toast.error("Erreur lors de l'accès structure", {
+        description: (err as Error).message,
+      });
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   const enrichedReports = useMemo<EnrichedReport[]>(() => {
     return (reports ?? []).map((r) => {
@@ -165,7 +322,6 @@ function DashboardPage() {
     return { total, nouveau, en_cours, resolu, dechetsCount, resolutionRate };
   }, [enrichedReports]);
 
-  // Répartition par commune (calculée depuis les localisations GPS des images)
   const communeBreakdown = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of enrichedReports) {
@@ -229,21 +385,165 @@ function DashboardPage() {
     URL.revokeObjectURL(url);
   };
 
-  if (loading || !isAutorite) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-background">
-        <AppHeader />
-        <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin" /></div>
+      <div className="min-h-screen bg-slate-50 dark:bg-background">
+        <StructureHeader />
+        <div className="flex justify-center py-20">
+          <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+        </div>
       </div>
     );
   }
 
+  // ÉCRAN 1 : INSCRIPTION / CONNEXION DÉDIÉ AUX STRUCTURES (totalement séparé des citoyens)
+  if (!isAutorite) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-background">
+        <StructureHeader />
+        <main className="mx-auto max-w-md px-4 py-10">
+          <div className="mb-6 flex flex-col items-center text-center">
+            <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-700 text-white shadow-lg">
+              <Building2 className="h-7 w-7" />
+            </div>
+            <h1 className="text-2xl font-bold">Portail des Structures</h1>
+            <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
+              Plateforme réservée aux Mairies, ONG, Associations et Opérateurs d'assainissement.
+            </p>
+          </div>
+
+          <Card className="p-6 shadow-lg border-slate-200">
+            <div className="mb-5 flex rounded-lg bg-muted p-1 text-xs font-medium">
+              <button
+                type="button"
+                onClick={() => setAuthMode("register")}
+                className={`flex-1 rounded-md py-2 transition ${
+                  authMode === "register"
+                    ? "bg-background shadow-sm font-semibold text-foreground"
+                    : "text-muted-foreground"
+                }`}
+              >
+                Inscrire ma structure
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuthMode("login")}
+                className={`flex-1 rounded-md py-2 transition ${
+                  authMode === "login"
+                    ? "bg-background shadow-sm font-semibold text-foreground"
+                    : "text-muted-foreground"
+                }`}
+              >
+                Connexion structure
+              </button>
+            </div>
+
+            <form onSubmit={handleStructureAuth} className="space-y-4">
+              <div>
+                <Label htmlFor="structureType" className="text-xs font-semibold">
+                  Quel est le type de votre structure ? *
+                </Label>
+                <Select value={structureType} onValueChange={setStructureType}>
+                  <SelectTrigger id="structureType" className="mt-1.5">
+                    <SelectValue placeholder="Choisissez le type de structure" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STRUCTURE_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {authMode === "register" && (
+                <div>
+                  <Label htmlFor="structureName" className="text-xs font-semibold">
+                    Nom de la structure *
+                  </Label>
+                  <Input
+                    id="structureName"
+                    type="text"
+                    required
+                    value={structureName}
+                    onChange={(e) => setStructureName(e.target.value)}
+                    placeholder="Ex: Mairie de Yopougon, ONG Abidjan Propre…"
+                    className="mt-1.5"
+                  />
+                </div>
+              )}
+
+              <div>
+                <Label htmlFor="email" className="text-xs font-semibold">
+                  Email professionnel / de contact *
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="contact@structure.ci"
+                  className="mt-1.5"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="password" className="text-xs font-semibold">
+                  Mot de passe *
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  required
+                  minLength={6}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Minimum 6 caractères"
+                  className="mt-1.5"
+                />
+              </div>
+
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+                <div className="flex items-start gap-2">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>
+                    <strong>Accès complet aux données :</strong> Dès votre inscription validée, peu importe le type de structure choisi (Mairie, ONG, Association…), vous accédez aux mêmes données de déchets et de signalements.
+                  </span>
+                </div>
+              </div>
+
+              <Button type="submit" disabled={authLoading} className="w-full bg-emerald-700 hover:bg-emerald-800" size="lg">
+                <Building2 className="mr-2 h-5 w-5" />
+                {authLoading
+                  ? "Ouverture du portail…"
+                  : authMode === "register"
+                  ? "Valider l'inscription & Accéder aux données"
+                  : "Accéder au tableau de bord"}
+              </Button>
+            </form>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // ÉCRAN 2 : TABLEAU DE BORD UNIFIÉ DES STRUCTURES (Mairies, ONG, etc.)
   return (
-    <div className="min-h-screen bg-background">
-      <AppHeader />
+    <div className="min-h-screen bg-slate-50 dark:bg-background">
+      <StructureHeader
+        structureName={structureProfile?.name || "Structure Partenaire"}
+        structureType={structureProfile?.type || "Mairie / ONG"}
+        onSignOut={async () => {
+          await signOut();
+          toast.success("Vous êtes déconnecté du portail des structures");
+        }}
+      />
+
       <main className="mx-auto max-w-6xl px-4 py-6 pb-20">
         {/* Bannière d'accueil de la structure connectée */}
-        <div className="mb-6 rounded-2xl border bg-gradient-to-r from-emerald-900 to-emerald-700 p-5 text-white shadow-md">
+        <div className="mb-6 rounded-2xl border bg-gradient-to-r from-slate-900 to-emerald-800 p-5 text-white shadow-md">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-0.5 text-xs font-semibold">
@@ -254,20 +554,15 @@ function DashboardPage() {
                 {structureProfile?.name || "Portail des Structures & Collectivités"}
               </h1>
               <p className="mt-1 text-xs sm:text-sm text-emerald-100">
-                Accès unifié à l'ensemble des données de déchets, d'insalubrité et de voirie signalées par les citoyens.
+                Accès unifié à l'ensemble des données de déchets, d'insalubrité et de voirie signalées sur le terrain.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button asChild variant="secondary" size="sm" className="gap-1">
-                <Link to="/carte">
-                  <Flame className="h-4 w-4 text-orange-600" /> Carte thermique
-                </Link>
-              </Button>
               <Button
                 onClick={downloadCsv}
-                variant="outline"
+                variant="secondary"
                 size="sm"
-                className="gap-1 border-white/40 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                className="gap-1.5 font-semibold"
               >
                 <Download className="h-4 w-4" /> Exporter les données (CSV)
               </Button>
@@ -296,7 +591,7 @@ function DashboardPage() {
                 onClick={() => setSearchLocality("")}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                   searchLocality === ""
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-emerald-700 text-white"
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
                 }`}
               >
@@ -309,7 +604,7 @@ function DashboardPage() {
                   onClick={() => setSearchLocality(c.name)}
                   className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                     normalizeSearch(searchLocality) === normalizeSearch(c.name)
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-emerald-700 text-white"
                       : "bg-muted text-muted-foreground hover:bg-muted/80"
                   }`}
                 >
@@ -329,7 +624,7 @@ function DashboardPage() {
               value={searchLocality}
               onChange={(e) => setSearchLocality(e.target.value)}
               placeholder="Rechercher commune ou quartier…"
-              className="pl-9 pr-8 text-xs"
+              className="bg-card pl-9 pr-8 text-xs"
             />
             {searchLocality && (
               <button
@@ -343,7 +638,7 @@ function DashboardPage() {
           </div>
 
           <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v as Category | "all")}>
-            <SelectTrigger className="text-xs">
+            <SelectTrigger className="bg-card text-xs">
               <SelectValue placeholder="Type de déchet / problème" />
             </SelectTrigger>
             <SelectContent>
@@ -357,7 +652,7 @@ function DashboardPage() {
           </Select>
 
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as Status | "all")}>
-            <SelectTrigger className="text-xs">
+            <SelectTrigger className="bg-card text-xs">
               <SelectValue placeholder="Statut d'intervention" />
             </SelectTrigger>
             <SelectContent>
@@ -371,7 +666,7 @@ function DashboardPage() {
           </Select>
 
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as "urgency" | "recent")}>
-            <SelectTrigger className="text-xs font-medium">
+            <SelectTrigger className="bg-card text-xs font-medium">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -420,7 +715,7 @@ function DashboardPage() {
 
                     <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1 font-medium text-foreground">
-                        <MapPin className="h-3.5 w-3.5 text-primary" />
+                        <MapPin className="h-3.5 w-3.5 text-emerald-600" />
                         {localityLabel}
                         {r.commune && r.ville && !normalizeSearch(r.ville).includes(normalizeSearch(r.commune))
                           ? ` (${r.commune})`
@@ -448,7 +743,7 @@ function DashboardPage() {
                         target="_blank"
                         rel="noreferrer"
                         href={`https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}`}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20"
+                        className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-600/20"
                       >
                         <Navigation className="h-3.5 w-3.5" />
                         Itinéraire terrain (Google Maps)
@@ -487,15 +782,11 @@ function DashboardPage() {
           })}
 
           {reports && filtered.length === 0 && (
-            <div className="rounded-xl border-2 border-dashed p-10 text-center text-muted-foreground">
+            <div className="rounded-xl border-2 border-dashed bg-card p-10 text-center text-muted-foreground">
               Aucun signalement ne correspond à vos filtres actuels.
             </div>
           )}
         </div>
-
-        <p className="mt-8 text-center text-xs text-muted-foreground">
-          <Link to="/" className="underline">← Retour au fil citoyen public</Link>
-        </p>
       </main>
     </div>
   );
@@ -518,10 +809,11 @@ function StatCard({
     <Card
       className={`p-4 ${accent ? "border-amber-300 bg-amber-50/60 dark:bg-amber-950/30" : ""} ${
         success ? "border-emerald-300 bg-emerald-50/70 dark:bg-emerald-950/30" : ""
-      } ${highlight ? "border-primary/30 bg-primary/5" : ""}`}
+      } ${highlight ? "border-emerald-500/30 bg-emerald-50/40" : ""}`}
     >
       <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1 text-2xl sm:text-3xl font-bold">{value}</div>
     </Card>
   );
-}
+}
+

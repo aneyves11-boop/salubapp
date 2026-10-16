@@ -33,7 +33,6 @@ import {
   ShieldCheck,
   Flame,
   TrendingUp,
-  Map as MapIcon,
   ListChecks,
   Wrench,
 } from "lucide-react";
@@ -197,8 +196,8 @@ function StructurePlatformPage() {
     getLocalSyncedStatuses()
   );
 
-  // Onglet principal du portail structure : Liste & Interventions vs Carte Graphique & Thermique
-  const [activeTab, setActiveTab] = useState<"map_list" | "map_only" | "list_only">("map_list");
+  // Onglet principal du portail structure : Carte Graphique & Statistiques vs Liste des signalements
+  const [activeTab, setActiveTab] = useState<"map" | "list">("map");
   const [mapMode, setMapMode] = useState<"photos" | "heatmap">("photos");
 
   const [searchLocality, setSearchLocality] = useState("");
@@ -718,48 +717,36 @@ function StructurePlatformPage() {
           </Select>
         </div>
 
-        {/* Sélecteur d'affichage : Carte + Liste / Carte Graphique seule / Liste seule */}
+        {/* Sélecteur d'affichage : Carte Graphique & Statistiques vs Liste des signalements */}
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-2.5 shadow-sm">
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setActiveTab("map_list")}
+              onClick={() => setActiveTab("map")}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                activeTab === "map_list"
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              <MapIcon className="h-3.5 w-3.5" />
-              Carte des Déchets + Interventions ({filtered.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("map_only")}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                activeTab === "map_only"
+                activeTab === "map"
                   ? "bg-slate-900 text-white shadow-sm"
                   : "text-muted-foreground hover:bg-muted"
               }`}
             >
               <Flame className="h-3.5 w-3.5 text-orange-500" />
-              Carte Graphique & Statistiques
+              Carte Graphique & Statistiques ({filtered.length})
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("list_only")}
+              onClick={() => setActiveTab("list")}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                activeTab === "list_only"
+                activeTab === "list"
                   ? "bg-slate-900 text-white shadow-sm"
                   : "text-muted-foreground hover:bg-muted"
               }`}
             >
               <ListChecks className="h-3.5 w-3.5" />
-              Liste seule ({filtered.length})
+              Liste & Interventions ({filtered.length})
             </button>
           </div>
 
-          {activeTab !== "list_only" && (
+          {activeTab === "map" && (
             <div className="flex items-center gap-1.5 rounded-lg bg-muted p-1 text-xs">
               <button
                 type="button"
@@ -788,7 +775,7 @@ function StructurePlatformPage() {
         </div>
 
         {/* SECTION CARTE GRAPHIQUE DES DÉCHETS & RÉPARTITION (identique à la vue citoyenne + outils structures) */}
-        {activeTab !== "list_only" && (
+        {activeTab === "map" && (
           <div className="mb-8 grid gap-6 lg:grid-cols-[1fr_320px]">
             {/* Carte Interactive */}
             <Card className="overflow-hidden border-slate-200 shadow-sm">
@@ -931,7 +918,7 @@ function StructurePlatformPage() {
         )}
 
         {/* LISTE DES SIGNALEMENTS ET GESTION DES STATUTS */}
-        {activeTab !== "map_only" && (
+        {activeTab === "list" && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-foreground">

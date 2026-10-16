@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
 import { isInAbidjan, calculateDistanceMeters, formatDistance, detectCommuneFromCoords } from "@/lib/abidjan";
 import { classifyImageServerFn, compareDuplicateImagesServerFn } from "@/lib/classify-image-fn";
+import { fetchSyncedStatuses } from "@/lib/status-sync";
 
 type NearbyDuplicate = {
   id: string;
@@ -67,22 +68,34 @@ function SignalerPage() {
     (async () => {
       setCheckingDuplicate(true);
       try {
-        const { data } = await supabase
-          .from("reports")
-          .select("id, category, description, photo_url, latitude, longitude, votes_count, status")
-          .eq("category", category)
-          .neq("status", "resolu")
-          .not("photo_url", "is", null)
-          .limit(30);
+        const [{ data }, syncedStatuses] = await Promise.all([
+          supabase
+            .from("reports")
+            .select("id, category, description, photo_url, latitude, longitude, votes_count, status")
+            .eq("category", category)
+            .neq("status", "resolu")
+            .not("photo_url", "is", null)
+            .limit(30),
+          fetchSyncedStatuses(),
+        ]);
 
         if (!data || data.length === 0 || !isMounted) {
           if (isMounted) setNearbyDuplicate(null);
           return;
         }
 
-        // 1. Filtrer d'abord les signalements situés dans la même zone géographique (rayon de 150m)
+        // 1. Filtrer d'abord les signalements actifs situés dans la même zone géographique (rayon de 150m)
         const nearbyCandidates = data
-          .filter((rep) => rep.latitude && rep.longitude && rep.photo_url)
+          .filter((rep) => {
+            const effectiveStatus = syncedStatuses[rep.id]?.status ?? rep.status;
+            return (
+              effectiveStatus !== "resolu" &&
+              effectiveStatus !== "rejete" &&
+              rep.latitude &&
+              rep.longitude &&
+              rep.photo_url
+            );
+          })
           .map((rep) => ({
             id: rep.id,
             category: rep.category as Category,

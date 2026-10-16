@@ -7,12 +7,14 @@ import { Button } from "@/components/ui/button";
 import { categoryImage, categoryLabel, statusInfo } from "@/lib/categories";
 import { detectCommuneFromCoords } from "@/lib/abidjan";
 import type { Database } from "@/integrations/supabase/types";
-import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench, MessageSquare, Send } from "lucide-react";
+import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench, MessageSquare, Send, Lock } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 
-type Report = Database["public"]["Tables"]["reports"]["Row"];
+type Report = Database["public"]["Tables"]["reports"]["Row"] & {
+  resolvedByStructure?: string;
+};
 type Comment = { id: string; content: string; created_at: string; user_id: string; approved: boolean };
 
 export function ReportCard({ report, hasVoted, onVoteChange }: {
@@ -33,6 +35,11 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
   const created = new Date(report.created_at);
   const locality = report.ville || detectCommuneFromCoords(report.latitude, report.longitude);
 
+  const isResolved = report.status === "resolu";
+  const isRejected = report.status === "rejete";
+  const isInProgress = report.status === "en_cours";
+  const isVotingLocked = isResolved || isRejected;
+
   useEffect(() => {
     if (!user) { setMyVerif(null); setMyStatus(null); return; }
     supabase.from("report_verifications").select("is_true, kind")
@@ -46,6 +53,10 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
   }, [user, report.id]);
 
   const verify = async (isTrue: boolean) => {
+    if (isVotingLocked) {
+      toast.info("Ce signalement est clôturé : les votes ne sont plus possibles.");
+      return;
+    }
     if (!user) { toast.info("Connectez-vous pour vérifier"); return; }
     setVerifBusy(true);
     if (myVerif === isTrue) {
@@ -63,6 +74,10 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
 
   // isPersistent=true → "encore présent" ; false → "déjà résolu"
   const reportStatus = async (isPersistent: boolean) => {
+    if (isVotingLocked) {
+      toast.info("Ce signalement est déjà résolu : les votes sont clôturés.");
+      return;
+    }
     if (!user) { toast.info("Connectez-vous pour signaler le statut"); return; }
     setStatusBusy(true);
     if (myStatus === isPersistent) {
@@ -88,6 +103,10 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
   };
 
   const toggleVote = async () => {
+    if (isVotingLocked) {
+      toast.info("Ce signalement est résolu : il n'est plus possible de voter.");
+      return;
+    }
     if (!user) { toast.info("Connectez-vous pour voter"); return; }
     setBusy(true);
     if (hasVoted) {
@@ -133,7 +152,7 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
   };
 
   return (
-    <Card className="overflow-hidden">
+    <Card className={`overflow-hidden transition ${isResolved ? "border-emerald-300 ring-1 ring-emerald-500/20" : ""}`}>
       <div className="relative">
         <img
           src={report.photo_url || categoryImage(report.category)}
@@ -141,6 +160,16 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
           loading="lazy"
           className="h-48 w-full object-cover"
         />
+        {isResolved && (
+          <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-md">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Problème résolu
+          </span>
+        )}
+        {isInProgress && (
+          <span className="absolute top-2 left-2 inline-flex items-center gap-1 rounded-full bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-white shadow-md">
+            <Wrench className="h-3.5 w-3.5" /> Intervention en cours
+          </span>
+        )}
         {!report.photo_url && (
           <span className="absolute bottom-2 left-2 rounded-md bg-black/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white">
             Illustration
@@ -167,39 +196,71 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
           </div>
         )}
 
-        <div className="flex items-center gap-2 border-t pt-2 text-xs">
+        {isResolved && (
+          <div className="rounded-lg border border-emerald-300 bg-emerald-50/90 p-2.5 text-xs text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+            <div className="flex items-center gap-1.5 font-semibold text-emerald-800 dark:text-emerald-300">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+              Problème résolu {report.resolvedByStructure ? `(${report.resolvedByStructure})` : ""}
+            </div>
+            <p className="mt-0.5 text-[11px] text-emerald-700/90 dark:text-emerald-300/80">
+              Ce signalement a été traité. Les votes et confirmations citoyennes sont clôturés.
+            </p>
+          </div>
+        )}
+
+        {isInProgress && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50/90 p-2.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-300">
+              <Wrench className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+              Pris en charge {report.resolvedByStructure ? `(${report.resolvedByStructure})` : "par une structure"}
+            </div>
+            <p className="mt-0.5 text-[11px] text-amber-700/90 dark:text-amber-300/80">
+              Une intervention est actuellement en cours sur ce signalement.
+            </p>
+          </div>
+        )}
+
+        <div className={`flex items-center gap-2 border-t pt-2 text-xs ${isVotingLocked ? "opacity-60" : ""}`}>
           <span className="text-muted-foreground">Vérification :</span>
           <Button size="sm" variant={myVerif === true ? "default" : "outline"}
-            disabled={verifBusy} onClick={() => verify(true)}
+            disabled={verifBusy || isVotingLocked} onClick={() => verify(true)}
             className={`h-7 gap-1 px-2 ${myVerif === true ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}>
             <CheckCircle2 className="h-3 w-3" /> Vrai · {report.true_count}
           </Button>
           <Button size="sm" variant={myVerif === false ? "default" : "outline"}
-            disabled={verifBusy} onClick={() => verify(false)}
+            disabled={verifBusy || isVotingLocked} onClick={() => verify(false)}
             className={`h-7 gap-1 px-2 ${myVerif === false ? "bg-red-600 hover:bg-red-700" : ""}`}>
             <XCircle className="h-3 w-3" /> Faux · {report.false_count}
           </Button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-t pt-2 text-xs">
+        <div className={`flex flex-wrap items-center gap-2 border-t pt-2 text-xs ${isVotingLocked ? "opacity-60" : ""}`}>
           <span className="text-muted-foreground">État sur place :</span>
           <Button size="sm" variant={myStatus === true ? "default" : "outline"}
-            disabled={statusBusy} onClick={() => reportStatus(true)}
+            disabled={statusBusy || isVotingLocked} onClick={() => reportStatus(true)}
             className={`h-7 gap-1 px-2 ${myStatus === true ? "bg-amber-600 hover:bg-amber-700" : ""}`}>
             <Clock className="h-3 w-3" /> Persistant · {report.persistent_count ?? 0}
           </Button>
-          <Button size="sm" variant={myStatus === false ? "default" : "outline"}
-            disabled={statusBusy} onClick={() => reportStatus(false)}
-            className={`h-7 gap-1 px-2 ${myStatus === false ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}>
-            <Wrench className="h-3 w-3" /> Déjà résolu · {report.resolved_community_count ?? 0}
+          <Button size="sm" variant={myStatus === false || isResolved ? "default" : "outline"}
+            disabled={statusBusy || isVotingLocked} onClick={() => reportStatus(false)}
+            className={`h-7 gap-1 px-2 ${myStatus === false || isResolved ? "bg-emerald-600 hover:bg-emerald-700" : ""}`}>
+            <Wrench className="h-3 w-3" /> Déjà résolu · {isResolved ? Math.max(1, report.resolved_community_count ?? 0) : (report.resolved_community_count ?? 0)}
           </Button>
         </div>
 
         <div className="flex items-center justify-between pt-2">
-          <Button variant={hasVoted ? "default" : "outline"} size="sm" onClick={toggleVote} disabled={busy} className="gap-1">
-            <ThumbsUp className="h-4 w-4" />
-            {report.votes_count > 0 ? `${report.votes_count} ` : ""}{hasVoted ? "Confirmé" : "Je confirme (+1)"}
-          </Button>
+          {isVotingLocked ? (
+            <Button variant="secondary" size="sm" disabled className="gap-1.5 text-xs font-semibold opacity-80">
+              <Lock className="h-3.5 w-3.5 text-emerald-700" />
+              {isResolved ? "Résolu · Votes clôturés" : "Clôturé"}
+              {report.votes_count > 0 ? ` (${report.votes_count})` : ""}
+            </Button>
+          ) : (
+            <Button variant={hasVoted ? "default" : "outline"} size="sm" onClick={toggleVote} disabled={busy} className="gap-1">
+              <ThumbsUp className="h-4 w-4" />
+              {report.votes_count > 0 ? `${report.votes_count} ` : ""}{hasVoted ? "Confirmé" : "Je confirme (+1)"}
+            </Button>
+          )}
           <Link to="/" search={{}} className="text-xs text-muted-foreground hover:underline"
             onClick={(e) => {
               e.preventDefault();

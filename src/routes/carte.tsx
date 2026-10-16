@@ -7,6 +7,13 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CATEGORIES, categoryLabel, type Category } from "@/lib/categories";
+import { detectCommuneFromCoords } from "@/lib/abidjan";
+import {
+  fetchSyncedStatuses,
+  getLocalSyncedStatuses,
+  subscribeToStatusSync,
+  type SyncedStatusEntry,
+} from "@/lib/status-sync";
 import type { Database } from "@/integrations/supabase/types";
 import { Loader2, Flame, MapPin, TrendingUp, Filter } from "lucide-react";
 
@@ -24,14 +31,37 @@ export const Route = createFileRoute("/carte")({
 
 function PublicDashboard() {
   const { user } = useAuth();
-  const [reports, setReports] = useState<Report[] | null>(null);
+  const [rawReports, setRawReports] = useState<Report[] | null>(null);
+  const [syncedStatuses, setSyncedStatuses] = useState<Record<string, SyncedStatusEntry>>(() =>
+    getLocalSyncedStatuses()
+  );
   const [active, setActive] = useState<Set<Category>>(new Set(CATEGORIES.map((c) => c.value)));
 
   useEffect(() => {
     const source = user ? "reports" : "reports_public";
-    (supabase as any).from(source).select("*").order("created_at", { ascending: false }).limit(1000)
-      .then(({ data }: { data: Report[] | null }) => setReports(data ?? []));
+    Promise.all([
+      (supabase as any).from(source).select("*").order("created_at", { ascending: false }).limit(1000),
+      fetchSyncedStatuses(),
+    ]).then(([{ data }, statuses]: [{ data: Report[] | null }, Record<string, SyncedStatusEntry>]) => {
+      setSyncedStatuses(statuses);
+      setRawReports(data ?? []);
+    });
   }, [user?.id]);
+
+  useEffect(() => {
+    return subscribeToStatusSync(() => {
+      setSyncedStatuses(getLocalSyncedStatuses());
+      void fetchSyncedStatuses().then(setSyncedStatuses);
+    });
+  }, []);
+
+  const reports = useMemo<Report[] | null>(() => {
+    if (!rawReports) return null;
+    return rawReports.map((r) => ({
+      ...r,
+      status: syncedStatuses[r.id]?.status ?? r.status,
+    }));
+  }, [rawReports, syncedStatuses]);
 
   const filtered = useMemo(
     () => (reports ?? []).filter((r) => active.has(r.category as Category)),
@@ -47,7 +77,8 @@ function PublicDashboard() {
   const topZones = useMemo(() => {
     const m = new Map<string, number>();
     (reports ?? []).forEach((r) => {
-      const key = (r.ville ?? "Zone inconnue").trim() || "Zone inconnue";
+      const detected = detectCommuneFromCoords(r.latitude, r.longitude);
+      const key = (r.ville || detected || "Abidjan").trim() || "Abidjan";
       m.set(key, (m.get(key) ?? 0) + 1);
     });
     return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);

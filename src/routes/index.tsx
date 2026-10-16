@@ -11,6 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { calculateDistanceMeters, detectCommuneFromCoords, ABIDJAN_COMMUNES } from "@/lib/abidjan";
+import {
+  fetchSyncedStatuses,
+  getLocalSyncedStatuses,
+  subscribeToStatusSync,
+  type SyncedStatusEntry,
+} from "@/lib/status-sync";
 import type { Database } from "@/integrations/supabase/types";
 import { PlusCircle, Loader2, Megaphone, Flame, MapPin, Search, X } from "lucide-react";
 
@@ -19,6 +25,7 @@ const ReportsMap = lazy(() => import("@/components/ReportsMap").then((m) => ({ d
 type Report = Database["public"]["Tables"]["reports"]["Row"] & {
   distance?: number;
   commune?: string | null;
+  resolvedByStructure?: string;
 };
 
 /** Normalise une chaîne pour une recherche insensible aux accents et à la casse */
@@ -41,6 +48,9 @@ export const Route = createFileRoute("/")({
 function HomePage() {
   const { user } = useAuth();
   const [reports, setReports] = useState<Report[] | null>(null);
+  const [syncedStatuses, setSyncedStatuses] = useState<Record<string, SyncedStatusEntry>>(() =>
+    getLocalSyncedStatuses()
+  );
   const [votedIds, setVotedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<Category | "all">("all");
   const [searchLocality, setSearchLocality] = useState("");
@@ -58,11 +68,21 @@ function HomePage() {
     );
   }, []);
 
+  const syncStatuses = async () => {
+    setSyncedStatuses(getLocalSyncedStatuses());
+    const cloud = await fetchSyncedStatuses();
+    setSyncedStatuses(cloud);
+  };
+
   const load = async () => {
     // Visiteurs anonymes : on lit la vue publique (sans user_id, coordonnées floutées).
     // Utilisateurs connectés : table complète (nécessaire pour vérifier/voter/commenter).
     const source = user ? "reports" : "reports_public";
-    const { data } = await (supabase as any).from(source).select("*").order("created_at", { ascending: false }).limit(200);
+    const [{ data }, cloudStatuses] = await Promise.all([
+      (supabase as any).from(source).select("*").order("created_at", { ascending: false }).limit(200),
+      fetchSyncedStatuses(),
+    ]);
+    setSyncedStatuses(cloudStatuses);
     setReports((data ?? []) as Report[]);
     if (user && data && data.length) {
       const { data: votes } = await supabase.from("report_votes").select("report_id").eq("user_id", user.id);
@@ -73,18 +93,33 @@ function HomePage() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [user?.id]);
 
-  // Enrichit chaque signalement avec sa commune détectée depuis les coordonnées GPS de l'image + sa distance
+  useEffect(() => {
+    return subscribeToStatusSync(() => {
+      void syncStatuses();
+    });
+  }, []);
+
+  // Enrichit chaque signalement avec son statut synchronisé (depuis le portail structures), sa commune GPS et sa distance
   const enrichedReports = useMemo(() => {
     if (!reports) return [];
     return reports.map((r) => {
+      const synced = syncedStatuses[r.id];
+      const effectiveStatus = synced?.status ?? r.status;
+      const resolvedByStructure = synced?.structureName || synced?.structureType;
       const distance =
         userCoords && r.latitude && r.longitude
           ? calculateDistanceMeters(userCoords.lat, userCoords.lng, r.latitude, r.longitude)
           : undefined;
       const commune = detectCommuneFromCoords(r.latitude, r.longitude);
-      return { ...r, distance, commune };
+      return {
+        ...r,
+        status: effectiveStatus,
+        resolvedByStructure,
+        distance,
+        commune,
+      };
     });
-  }, [reports, userCoords]);
+  }, [reports, userCoords, syncedStatuses]);
 
   // Liste dynamique des communes ayant des signalements (calculée à partir des localisations GPS des images et du champ ville)
   const availableCommunes = useMemo(() => {

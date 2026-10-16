@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
@@ -10,6 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CATEGORIES, STATUSES, categoryLabel, statusInfo, type Category, type Status } from "@/lib/categories";
 import { detectCommuneFromCoords } from "@/lib/abidjan";
+import {
+  fetchSyncedStatuses,
+  getLocalSyncedStatuses,
+  updateReportStatusSynced,
+  subscribeToStatusSync,
+  type SyncedStatusEntry,
+} from "@/lib/status-sync";
 import type { Database } from "@/integrations/supabase/types";
 import {
   Download,
@@ -24,8 +31,20 @@ import {
   X,
   LogOut,
   ShieldCheck,
+  Flame,
+  TrendingUp,
+  Map as MapIcon,
+  ListChecks,
+  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
+
+const ReportsMap = lazy(() =>
+  import("@/components/ReportsMap").then((m) => ({ default: m.ReportsMap }))
+);
+const HeatMap = lazy(() =>
+  import("@/components/HeatMap").then((m) => ({ default: m.HeatMap }))
+);
 
 type Report = Database["public"]["Tables"]["reports"]["Row"];
 
@@ -34,8 +53,6 @@ type EnrichedReport = Report & {
   urgencyScore: number;
   urgencyLevel: "critique" | "elevee" | "normale";
 };
-
-const LOCAL_STATUS_KEY = "salubapp_structure_status_overrides";
 
 const STRUCTURE_TYPES = [
   { value: "Mairie / Collectivité", label: "🏛️ Mairie / Collectivité locale" },
@@ -137,7 +154,7 @@ function StructureHeader({
               </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Plateforme dédiée de gestion et de suivi des données de salubrité
+              Plateforme dédiée de gestion, cartographie et suivi des données de salubrité
             </div>
           </div>
         </div>
@@ -176,17 +193,13 @@ function StructurePlatformPage() {
   const [password, setPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
 
-  const [statusOverrides, setStatusOverrides] = useState<Record<string, Status>>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(LOCAL_STATUS_KEY);
-        if (raw) return JSON.parse(raw);
-      } catch {
-        // ignore
-      }
-    }
-    return {};
-  });
+  const [syncedStatuses, setSyncedStatuses] = useState<Record<string, SyncedStatusEntry>>(() =>
+    getLocalSyncedStatuses()
+  );
+
+  // Onglet principal du portail structure : Liste & Interventions vs Carte Graphique & Thermique
+  const [activeTab, setActiveTab] = useState<"map_list" | "map_only" | "list_only">("map_list");
+  const [mapMode, setMapMode] = useState<"photos" | "heatmap">("photos");
 
   const [searchLocality, setSearchLocality] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<Category | "all">("all");
@@ -194,17 +207,28 @@ function StructurePlatformPage() {
   const [sortBy, setSortBy] = useState<"urgency" | "recent">("urgency");
 
   const load = async () => {
-    const { data } = await supabase
-      .from("reports")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1000);
+    const [{ data }, cloudStatuses] = await Promise.all([
+      supabase
+        .from("reports")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      fetchSyncedStatuses(),
+    ]);
+    setSyncedStatuses(cloudStatuses);
     setReports(data ?? []);
   };
 
   useEffect(() => {
     if (isAutorite) load();
   }, [isAutorite]);
+
+  useEffect(() => {
+    return subscribeToStatusSync(() => {
+      setSyncedStatuses(getLocalSyncedStatuses());
+      void fetchSyncedStatuses().then(setSyncedStatuses);
+    });
+  }, []);
 
   const handleStructureAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -299,7 +323,7 @@ function StructurePlatformPage() {
 
   const enrichedReports = useMemo<EnrichedReport[]>(() => {
     return (reports ?? []).map((r) => {
-      const effectiveStatus = statusOverrides[r.id] ?? r.status;
+      const effectiveStatus = syncedStatuses[r.id]?.status ?? r.status;
       const commune = detectCommuneFromCoords(r.latitude, r.longitude);
       const { score, level } = computeUrgency(r);
       return {
@@ -310,7 +334,7 @@ function StructurePlatformPage() {
         urgencyLevel: level,
       };
     });
-  }, [reports, statusOverrides]);
+  }, [reports, syncedStatuses]);
 
   const stats = useMemo(() => {
     const total = enrichedReports.length;
@@ -331,6 +355,16 @@ function StructurePlatformPage() {
     return Array.from(counts.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
+  }, [enrichedReports]);
+
+  const byCategory = useMemo(() => {
+    const m = new Map<Category, number>();
+    enrichedReports.forEach((r) =>
+      m.set(r.category as Category, (m.get(r.category as Category) ?? 0) + 1)
+    );
+    return CATEGORIES.map((c) => ({ ...c, count: m.get(c.value) ?? 0 })).sort(
+      (a, b) => b.count - a.count
+    );
   }, [enrichedReports]);
 
   const filtered = useMemo(() => {
@@ -360,19 +394,27 @@ function StructurePlatformPage() {
   }, [enrichedReports, categoryFilter, statusFilter, searchLocality, sortBy]);
 
   const updateStatus = async (id: string, s: Status) => {
-    const nextOverrides = { ...statusOverrides, [id]: s };
-    setStatusOverrides(nextOverrides);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(LOCAL_STATUS_KEY, JSON.stringify(nextOverrides));
-    }
+    const nextMap = await updateReportStatusSynced({
+      reportId: id,
+      status: s,
+      structureName: structureProfile?.name || "Structure partenaire",
+      structureType: structureProfile?.type || "Mairie / Collectivité",
+    });
+    setSyncedStatuses(nextMap);
 
-    const { error } = await supabase.from("reports").update({ status: s }).eq("id", id);
-    if (error) {
-      toast.success(`Statut passé à « ${statusInfo(s).label} » pour votre structure`);
-      return;
+    if (s === "resolu") {
+      toast.success("Signalement marqué « Résolu » ✅", {
+        description:
+          "Synchronisé avec l'interface citoyenne : les votes citoyens sur ce signalement sont désormais clôturés.",
+      });
+    } else if (s === "en_cours") {
+      toast.success("Statut passé à « En cours » 🚧", {
+        description:
+          "Les citoyens voient désormais que votre structure intervient sur ce signalement.",
+      });
+    } else {
+      toast.success(`Statut mis à jour : ${statusInfo(s).label}`);
     }
-    toast.success(`Statut mis à jour : ${statusInfo(s).label}`);
-    load();
   };
 
   const downloadCsv = () => {
@@ -554,7 +596,7 @@ function StructurePlatformPage() {
                 {structureProfile?.name || "Portail des Structures & Collectivités"}
               </h1>
               <p className="mt-1 text-xs sm:text-sm text-emerald-100">
-                Accès unifié à l'ensemble des données de déchets, d'insalubrité et de voirie signalées sur le terrain.
+                Visualisez la carte des déchets en temps réel et gérez les statuts d'intervention (synchronisés avec la population).
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -676,117 +718,363 @@ function StructurePlatformPage() {
           </Select>
         </div>
 
-        {/* Liste des signalements accessibles à la structure */}
-        <div className="space-y-3">
-          {filtered.map((r) => {
-            const localityLabel = r.ville || r.commune || "Abidjan";
-            return (
-              <Card key={r.id} className="p-4 transition hover:shadow-sm">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-                  {r.photo_url && (
-                    <img
-                      src={r.photo_url}
-                      alt={categoryLabel(r.category)}
-                      className="h-32 w-full shrink-0 rounded-lg object-cover sm:h-28 sm:w-36"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-sm">{categoryLabel(r.category)}</span>
-                      <Badge className={statusInfo(r.status).color}>{statusInfo(r.status).label}</Badge>
+        {/* Sélecteur d'affichage : Carte + Liste / Carte Graphique seule / Liste seule */}
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-2.5 shadow-sm">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setActiveTab("map_list")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                activeTab === "map_list"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <MapIcon className="h-3.5 w-3.5" />
+              Carte des Déchets + Interventions ({filtered.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("map_only")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                activeTab === "map_only"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <Flame className="h-3.5 w-3.5 text-orange-500" />
+              Carte Graphique & Statistiques
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("list_only")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                activeTab === "list_only"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              <ListChecks className="h-3.5 w-3.5" />
+              Liste seule ({filtered.length})
+            </button>
+          </div>
 
-                      {r.urgencyLevel === "critique" && (
-                        <Badge className="bg-red-600 text-white hover:bg-red-600">
-                          🔴 Urgence Critique
-                        </Badge>
-                      )}
-                      {r.urgencyLevel === "elevee" && (
-                        <Badge className="bg-amber-500 text-white hover:bg-amber-500">
-                          🟠 Priorité Élevée
-                        </Badge>
-                      )}
-
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {new Date(r.created_at).toLocaleString("fr-FR")}
-                      </span>
-                    </div>
-
-                    <p className="text-sm">{r.description}</p>
-
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1 font-medium text-foreground">
-                        <MapPin className="h-3.5 w-3.5 text-emerald-600" />
-                        {localityLabel}
-                        {r.commune && r.ville && !normalizeSearch(r.ville).includes(normalizeSearch(r.commune))
-                          ? ` (${r.commune})`
-                          : ""}
-                      </span>
-
-                      <span className="inline-flex items-center gap-1">
-                        <ThumbsUp className="h-3.5 w-3.5 text-emerald-600" />
-                        <strong>{r.votes_count}</strong> confirmation{r.votes_count > 1 ? "s" : ""} (+1)
-                      </span>
-
-                      <span className="inline-flex items-center gap-1">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                        <strong>{r.true_count}</strong> Vrai
-                      </span>
-
-                      <span className="inline-flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5 text-amber-600" />
-                        <strong>{r.persistent_count}</strong> Persistant
-                      </span>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <a
-                        target="_blank"
-                        rel="noreferrer"
-                        href={`https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}`}
-                        className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-600/20"
-                      >
-                        <Navigation className="h-3.5 w-3.5" />
-                        Itinéraire terrain (Google Maps)
-                      </a>
-                      <a
-                        target="_blank"
-                        rel="noreferrer"
-                        href={`https://www.openstreetmap.org/?mlat=${r.latitude}&mlon=${r.longitude}#map=18/${r.latitude}/${r.longitude}`}
-                        className="text-xs text-muted-foreground underline hover:text-foreground"
-                      >
-                        GPS : {r.latitude.toFixed(4)}, {r.longitude.toFixed(4)}
-                      </a>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5 sm:items-end">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      Statut d'intervention :
-                    </span>
-                    <Select value={r.status} onValueChange={(v) => updateStatus(r.id, v as Status)}>
-                      <SelectTrigger className="w-full sm:w-40 text-xs font-semibold">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STATUSES.map((s) => (
-                          <SelectItem key={s.value} value={s.value}>
-                            {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-
-          {reports && filtered.length === 0 && (
-            <div className="rounded-xl border-2 border-dashed bg-card p-10 text-center text-muted-foreground">
-              Aucun signalement ne correspond à vos filtres actuels.
+          {activeTab !== "list_only" && (
+            <div className="flex items-center gap-1.5 rounded-lg bg-muted p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setMapMode("photos")}
+                className={`rounded-md px-2.5 py-1 font-medium transition ${
+                  mapMode === "photos"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                📍 Carte Photos & Statuts
+              </button>
+              <button
+                type="button"
+                onClick={() => setMapMode("heatmap")}
+                className={`rounded-md px-2.5 py-1 font-medium transition ${
+                  mapMode === "heatmap"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                🔥 Carte Thermique (Intensité)
+              </button>
             </div>
           )}
         </div>
+
+        {/* SECTION CARTE GRAPHIQUE DES DÉCHETS & RÉPARTITION (identique à la vue citoyenne + outils structures) */}
+        {activeTab !== "list_only" && (
+          <div className="mb-8 grid gap-6 lg:grid-cols-[1fr_320px]">
+            {/* Carte Interactive */}
+            <Card className="overflow-hidden border-slate-200 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/40 px-4 py-2.5 text-xs">
+                {mapMode === "heatmap" ? (
+                  <>
+                    <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                      <Flame className="h-3.5 w-3.5 text-orange-600" /> Intensité des déchets et nuisances (vert = faible, rouge = critique)
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="h-2 w-6 rounded-l-full bg-green-500" />
+                      <span className="h-2 w-6 bg-yellow-500" />
+                      <span className="h-2 w-6 bg-orange-500" />
+                      <span className="h-2 w-6 bg-red-500" />
+                      <span className="h-2 w-6 rounded-r-full bg-red-900" />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
+                      <MapPin className="h-3.5 w-3.5 text-emerald-600" /> Cliquez sur un point de déchet pour voir la photo et modifier son statut
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px]">
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Nouveau
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> En cours
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> Résolu
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="h-[52vh] min-h-[400px] bg-muted">
+                {!reports ? (
+                  <div className="flex h-full items-center justify-center text-muted-foreground">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+                    Aucun signalement à afficher sur la carte avec ces filtres.
+                  </div>
+                ) : (
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full items-center justify-center">
+                        <Loader2 className="h-6 w-6 animate-spin" />
+                      </div>
+                    }
+                  >
+                    {mapMode === "heatmap" ? (
+                      <HeatMap reports={filtered} />
+                    ) : (
+                      <ReportsMap reports={filtered} onSelectStatus={updateStatus} />
+                    )}
+                  </Suspense>
+                )}
+              </div>
+            </Card>
+
+            {/* Graphiques latéraux (Répartition par type + Communes les plus touchées) */}
+            <div className="space-y-4">
+              <Card className="p-4 border-slate-200 shadow-sm">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <TrendingUp className="h-4 w-4 text-emerald-600" /> Répartition par type
+                </div>
+                <div className="space-y-2.5">
+                  {byCategory.map((c) => {
+                    const pct = stats.total ? (c.count / stats.total) * 100 : 0;
+                    const isSelected = categoryFilter === c.value;
+                    return (
+                      <button
+                        key={c.value}
+                        type="button"
+                        onClick={() =>
+                          setCategoryFilter(isSelected ? "all" : (c.value as Category))
+                        }
+                        className={`block w-full text-left rounded-md p-1 transition ${
+                          isSelected ? "bg-emerald-50 dark:bg-emerald-950/40 ring-1 ring-emerald-500/30" : "hover:bg-muted/60"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-medium">{c.label}</span>
+                          <span className="font-mono text-muted-foreground">{c.count}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full bg-emerald-600 transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Card>
+
+              <Card className="p-4 border-slate-200 shadow-sm">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <MapPin className="h-4 w-4 text-destructive" /> Zones les plus touchées
+                </div>
+                {communeBreakdown.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Aucune zone identifiée.</p>
+                ) : (
+                  <ol className="space-y-2">
+                    {communeBreakdown.slice(0, 6).map((c, i) => (
+                      <li
+                        key={c.name}
+                        onClick={() =>
+                          setSearchLocality(
+                            normalizeSearch(searchLocality) === normalizeSearch(c.name)
+                              ? ""
+                              : c.name
+                          )
+                        }
+                        className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted/60"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Badge
+                            variant={i === 0 ? "destructive" : "secondary"}
+                            className="h-6 w-6 justify-center rounded-full p-0 text-xs"
+                          >
+                            {i + 1}
+                          </Badge>
+                          <span className="truncate font-medium">{c.name}</span>
+                        </span>
+                        <span className="font-mono text-xs font-semibold text-muted-foreground">
+                          {c.count} signalement{c.count > 1 ? "s" : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* LISTE DES SIGNALEMENTS ET GESTION DES STATUTS */}
+        {activeTab !== "map_only" && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-foreground">
+                📋 Signalements terrain & Statuts d'intervention ({filtered.length})
+              </h2>
+              <span className="text-xs text-muted-foreground">
+                Tout changement de statut est immédiatement visible par les citoyens
+              </span>
+            </div>
+
+            {filtered.map((r) => {
+              const localityLabel = r.ville || r.commune || "Abidjan";
+              return (
+                <Card
+                  key={r.id}
+                  className={`p-4 transition hover:shadow-sm ${
+                    r.status === "resolu"
+                      ? "border-emerald-300 bg-emerald-50/20"
+                      : r.status === "en_cours"
+                      ? "border-amber-300 bg-amber-50/10"
+                      : ""
+                  }`}
+                >
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                    {r.photo_url && (
+                      <img
+                        src={r.photo_url}
+                        alt={categoryLabel(r.category)}
+                        className="h-32 w-full shrink-0 rounded-lg object-cover sm:h-28 sm:w-36"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-sm">{categoryLabel(r.category)}</span>
+                        <Badge className={statusInfo(r.status).color}>{statusInfo(r.status).label}</Badge>
+
+                        {r.status !== "resolu" && r.urgencyLevel === "critique" && (
+                          <Badge className="bg-red-600 text-white hover:bg-red-600">
+                            🔴 Urgence Critique
+                          </Badge>
+                        )}
+                        {r.status !== "resolu" && r.urgencyLevel === "elevee" && (
+                          <Badge className="bg-amber-500 text-white hover:bg-amber-500">
+                            🟠 Priorité Élevée
+                          </Badge>
+                        )}
+                        {r.status === "resolu" && (
+                          <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+                            ✅ Résolu (Votes citoyens clôturés)
+                          </Badge>
+                        )}
+
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {new Date(r.created_at).toLocaleString("fr-FR")}
+                        </span>
+                      </div>
+
+                      <p className="text-sm">{r.description}</p>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 font-medium text-foreground">
+                          <MapPin className="h-3.5 w-3.5 text-emerald-600" />
+                          {localityLabel}
+                          {r.commune &&
+                          r.ville &&
+                          !normalizeSearch(r.ville).includes(normalizeSearch(r.commune))
+                            ? ` (${r.commune})`
+                            : ""}
+                        </span>
+
+                        <span className="inline-flex items-center gap-1">
+                          <ThumbsUp className="h-3.5 w-3.5 text-emerald-600" />
+                          <strong>{r.votes_count}</strong> confirmation{r.votes_count > 1 ? "s" : ""} (+1)
+                        </span>
+
+                        <span className="inline-flex items-center gap-1">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          <strong>{r.true_count}</strong> Vrai
+                        </span>
+
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5 text-amber-600" />
+                          <strong>{r.persistent_count}</strong> Persistant
+                        </span>
+
+                        {(r.resolved_community_count ?? 0) > 0 && (
+                          <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
+                            <Wrench className="h-3.5 w-3.5" />
+                            Signalé résolu par {r.resolved_community_count} citoyen(s)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <a
+                          target="_blank"
+                          rel="noreferrer"
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${r.latitude},${r.longitude}`}
+                          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600/10 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-600/20"
+                        >
+                          <Navigation className="h-3.5 w-3.5" />
+                          Itinéraire terrain (Google Maps)
+                        </a>
+                        <a
+                          target="_blank"
+                          rel="noreferrer"
+                          href={`https://www.openstreetmap.org/?mlat=${r.latitude}&mlon=${r.longitude}#map=18/${r.latitude}/${r.longitude}`}
+                          className="text-xs text-muted-foreground underline hover:text-foreground"
+                        >
+                          GPS : {r.latitude.toFixed(4)}, {r.longitude.toFixed(4)}
+                        </a>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 sm:items-end">
+                      <span className="text-[11px] font-medium text-muted-foreground">
+                        Statut d'intervention (synchronisé) :
+                      </span>
+                      <Select value={r.status} onValueChange={(v) => updateStatus(r.id, v as Status)}>
+                        <SelectTrigger className="w-full sm:w-44 text-xs font-semibold">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STATUSES.map((s) => (
+                            <SelectItem key={s.value} value={s.value}>
+                              {s.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+
+            {reports && filtered.length === 0 && (
+              <div className="rounded-xl border-2 border-dashed bg-card p-10 text-center text-muted-foreground">
+                Aucun signalement ne correspond à vos filtres actuels.
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
@@ -816,4 +1104,3 @@ function StatCard({
     </Card>
   );
 }
-

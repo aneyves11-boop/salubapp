@@ -7,16 +7,28 @@ import { AppFooter } from "@/components/AppFooter";
 import { ReportCard } from "@/components/ReportCard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CATEGORIES, type Category } from "@/lib/categories";
-import { calculateDistanceMeters, formatDistance } from "@/lib/abidjan";
+import { calculateDistanceMeters, detectCommuneFromCoords, ABIDJAN_COMMUNES } from "@/lib/abidjan";
 import type { Database } from "@/integrations/supabase/types";
-import { PlusCircle, Loader2, Megaphone, Flame, MapPin, Compass } from "lucide-react";
+import { PlusCircle, Loader2, Megaphone, Flame, MapPin, Search, X } from "lucide-react";
 
 const ReportsMap = lazy(() => import("@/components/ReportsMap").then((m) => ({ default: m.ReportsMap })));
 
-type Report = Database["public"]["Tables"]["reports"]["Row"] & { distance?: number };
-type SortMode = "proximity" | "recent" | "votes";
+type Report = Database["public"]["Tables"]["reports"]["Row"] & {
+  distance?: number;
+  commune?: string | null;
+};
+
+/** Normalise une chaîne pour une recherche insensible aux accents et à la casse */
+function normalizeSearch(str: string): string {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [
@@ -31,30 +43,19 @@ function HomePage() {
   const [reports, setReports] = useState<Report[] | null>(null);
   const [votedIds, setVotedIds] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<Category | "all">("all");
-  const [sortMode, setSortMode] = useState<SortMode>("recent");
+  const [searchLocality, setSearchLocality] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [geoLoading, setGeoLoading] = useState(false);
-
-  const askUserLocation = () => {
-    if (!navigator.geolocation) return;
-    setGeoLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setUserCoords({ lat, lng });
-        setSortMode("proximity");
-        setGeoLoading(false);
-      },
-      () => {
-        setGeoLoading(false);
-      },
-      { timeout: 8000, maximumAge: 60000 }
-    );
-  };
 
   useEffect(() => {
-    askUserLocation();
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {},
+      { timeout: 8000, maximumAge: 60000 }
+    );
   }, []);
 
   const load = async () => {
@@ -72,6 +73,7 @@ function HomePage() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [user?.id]);
 
+  // Enrichit chaque signalement avec sa commune détectée depuis les coordonnées GPS de l'image + sa distance
   const enrichedReports = useMemo(() => {
     if (!reports) return [];
     return reports.map((r) => {
@@ -79,22 +81,48 @@ function HomePage() {
         userCoords && r.latitude && r.longitude
           ? calculateDistanceMeters(userCoords.lat, userCoords.lng, r.latitude, r.longitude)
           : undefined;
-      return { ...r, distance };
+      const commune = detectCommuneFromCoords(r.latitude, r.longitude);
+      return { ...r, distance, commune };
     });
   }, [reports, userCoords]);
 
-  const sortedAndFiltered = useMemo(() => {
-    let list = enrichedReports.filter(
-      (r) => filter === "all" || r.category === filter
-    );
+  // Liste dynamique des communes ayant des signalements (calculée à partir des localisations GPS des images et du champ ville)
+  const availableCommunes = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of enrichedReports) {
+      if (filter !== "all" && r.category !== filter) continue;
+      // Identifier la commune soit via les coordonnées GPS de l'image, soit via le texte de ville
+      let matchedCommune: string | null = r.commune ?? null;
+      if (!matchedCommune && r.ville) {
+        const normVille = normalizeSearch(r.ville);
+        const found = ABIDJAN_COMMUNES.find((c) => normVille.includes(normalizeSearch(c)));
+        if (found) matchedCommune = found;
+      }
+      if (matchedCommune) {
+        counts.set(matchedCommune, (counts.get(matchedCommune) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "fr"));
+  }, [enrichedReports, filter]);
 
-    if (sortMode === "proximity" && userCoords) {
+  const sortedAndFiltered = useMemo(() => {
+    const query = normalizeSearch(searchLocality);
+
+    let list = enrichedReports.filter((r) => {
+      const matchCategory = filter === "all" || r.category === filter;
+      if (!matchCategory) return false;
+      if (!query) return true;
+
+      const communeNorm = r.commune ? normalizeSearch(r.commune) : "";
+      const villeNorm = r.ville ? normalizeSearch(r.ville) : "";
+      return communeNorm.includes(query) || villeNorm.includes(query);
+    });
+
+    if (userCoords) {
       list = [...list].sort(
         (a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity)
-      );
-    } else if (sortMode === "votes") {
-      list = [...list].sort(
-        (a, b) => (b.votes_count ?? 0) - (a.votes_count ?? 0)
       );
     } else {
       list = [...list].sort(
@@ -104,7 +132,14 @@ function HomePage() {
     }
 
     return list;
-  }, [enrichedReports, filter, sortMode, userCoords]);
+  }, [enrichedReports, filter, searchLocality, userCoords]);
+
+  // Suggestions de communes filtrées pendant la saisie dans la barre de recherche
+  const matchingSuggestions = useMemo(() => {
+    const q = normalizeSearch(searchLocality);
+    if (!q) return availableCommunes;
+    return availableCommunes.filter((c) => normalizeSearch(c.name).includes(q));
+  }, [availableCommunes, searchLocality]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -135,27 +170,70 @@ function HomePage() {
           </div>
         </section>
 
-        {/* Filtre + tri + tabs */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">
+        {/* Barre de recherche par commune/localité + Filtre catégories */}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold shrink-0">
             {reports ? `${sortedAndFiltered.length} signalement${sortedAndFiltered.length > 1 ? "s" : ""}` : "Chargement…"}
           </h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={sortMode} onValueChange={(v) => setSortMode(v as SortMode)}>
-              <SelectTrigger className="w-56 text-xs font-medium">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="proximity" disabled={!userCoords}>
-                  📍 Autour de moi {!userCoords ? "(GPS requis)" : ""}
-                </SelectItem>
-                <SelectItem value="recent">⏱️ Plus récents</SelectItem>
-                <SelectItem value="votes">🔥 Plus confirmés (+1)</SelectItem>
-              </SelectContent>
-            </Select>
+
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-2 sm:max-w-2xl">
+            {/* Barre de recherche de commune / localité */}
+            <div className="relative flex-1 min-w-[230px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="text"
+                value={searchLocality}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setTimeout(() => setSearchFocused(false), 180)}
+                onChange={(e) => setSearchLocality(e.target.value)}
+                placeholder="Rechercher une commune (ex: Yopougon, Cocody…)"
+                className="h-9 pl-9 pr-8 text-xs"
+              />
+              {searchLocality && (
+                <button
+                  type="button"
+                  onClick={() => setSearchLocality("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Effacer la recherche"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+
+              {/* Menu de suggestions des communes détectées dans les signalements */}
+              {searchFocused && matchingSuggestions.length > 0 && (
+                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-auto rounded-lg border bg-popover p-1.5 shadow-md">
+                  <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Communes avec signalements
+                  </div>
+                  {matchingSuggestions.map((c) => (
+                    <button
+                      key={c.name}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setSearchLocality(c.name);
+                        setSearchFocused(false);
+                      }}
+                      className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                    >
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <MapPin className="h-3.5 w-3.5 text-primary" />
+                        {c.name}
+                      </span>
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        {c.count} signalement{c.count > 1 ? "s" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <Select value={filter} onValueChange={(v) => setFilter(v as Category | "all")}>
-              <SelectTrigger className="w-48 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-full sm:w-52 text-xs">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Toutes les catégories</SelectItem>
                 {CATEGORIES.map((c) => (
@@ -166,34 +244,6 @@ function HomePage() {
           </div>
         </div>
 
-        {/* Indicateur de géolocalisation pour l'entourage */}
-        {userCoords && sortMode === "proximity" && (
-          <div className="mb-4 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-            <div className="flex items-center gap-1.5 font-medium">
-              <MapPin className="h-3.5 w-3.5 text-emerald-600" />
-              Signalements classés par proximité avec votre position actuelle (votre entourage en premier).
-            </div>
-            <span className="text-[11px] font-semibold text-emerald-700">Abidjan · En direct</span>
-          </div>
-        )}
-        {!userCoords && (
-          <div className="mb-4 flex items-center justify-between rounded-lg border bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5 text-primary" />
-              Activez la géolocalisation pour afficher en priorité les signalements de votre entourage.
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={askUserLocation}
-              disabled={geoLoading}
-              className="h-7 text-xs font-medium"
-            >
-              {geoLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Compass className="h-3 w-3 mr-1" />}
-              Autour de moi
-            </Button>
-          </div>
-        )}
 
         <Tabs defaultValue="liste">
           <TabsList className="mb-4">

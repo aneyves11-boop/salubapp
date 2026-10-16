@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { categoryImage, categoryLabel, statusInfo } from "@/lib/categories";
-import { formatDistance } from "@/lib/abidjan";
+import { detectCommuneFromCoords } from "@/lib/abidjan";
 import type { Database } from "@/integrations/supabase/types";
 import { ThumbsUp, MapPin, CheckCircle2, XCircle, AlertTriangle, ShieldCheck, Clock, Wrench, MessageSquare, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,7 +15,7 @@ import { Link } from "@tanstack/react-router";
 type Report = Database["public"]["Tables"]["reports"]["Row"];
 type Comment = { id: string; content: string; created_at: string; user_id: string; approved: boolean };
 
-export function ReportCard({ report, hasVoted, onVoteChange, distanceMeters }: {
+export function ReportCard({ report, hasVoted, onVoteChange }: {
   report: Report; hasVoted: boolean; onVoteChange: () => void; distanceMeters?: number;
 }) {
   const { user } = useAuth();
@@ -31,6 +31,7 @@ export function ReportCard({ report, hasVoted, onVoteChange, distanceMeters }: {
   const [submittingComment, setSubmittingComment] = useState(false);
   const status = statusInfo(report.status);
   const created = new Date(report.created_at);
+  const locality = report.ville || detectCommuneFromCoords(report.latitude, report.longitude);
 
   useEffect(() => {
     if (!user) { setMyVerif(null); setMyStatus(null); return; }
@@ -160,9 +161,9 @@ export function ReportCard({ report, hasVoted, onVoteChange, distanceMeters }: {
           </div>
         </div>
         <p className="text-sm">{report.description}</p>
-        {report.ville && (
+        {locality && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="h-3 w-3" /> {report.ville}
+            <MapPin className="h-3 w-3" /> {locality}
           </div>
         )}
 

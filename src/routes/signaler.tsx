@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon, AlertTriangle, ThumbsUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
-import { isInAbidjan, calculateDistanceMeters, formatDistance } from "@/lib/abidjan";
+import { isInAbidjan, calculateDistanceMeters, formatDistance, detectCommuneFromCoords } from "@/lib/abidjan";
 import { classifyImageServerFn, compareDuplicateImagesServerFn } from "@/lib/classify-image-fn";
 
 type NearbyDuplicate = {
@@ -177,6 +177,10 @@ function SignalerPage() {
         }
         setCoords({ lat, lng });
         setGeoState("ok");
+        const detectedCommune = detectCommuneFromCoords(lat, lng);
+        if (detectedCommune) {
+          setVille((prev) => (prev.trim().length === 0 ? detectedCommune : prev));
+        }
       },
       (err) => { setGeoState("error"); toast.error("Position impossible", { description: err.message }); },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
@@ -338,7 +342,7 @@ function SignalerPage() {
         photo_url,
         latitude: coords.lat,
         longitude: coords.lng,
-        ville: ville.trim() || null,
+        ville: ville.trim() || detectCommuneFromCoords(coords.lat, coords.lng) || null,
       });
       if (error) throw error;
       toast.success("Merci ! Signalement enregistré.");

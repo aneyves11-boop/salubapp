@@ -32,13 +32,7 @@ function LoginPage() {
   const { user, isAutorite, setStructureProfile } = useAuth();
   const [loading, setLoading] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<"citoyen" | "structure">(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("mode") === "structure") return "structure";
-    }
-    return "citoyen";
-  });
+  const [activeTab, setActiveTab] = useState<"citoyen" | "structure">("structure");
 
   // État du formulaire Structure (Inscription / Connexion)
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
@@ -48,12 +42,24 @@ function LoginPage() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    if (user && activeTab === "citoyen") {
-      navigate({ to: "/" });
-    } else if (user && isAutorite && activeTab === "structure") {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("mode") === "structure") {
+        setActiveTab("structure");
+        return;
+      }
+      // Si l'utilisateur n'est pas encore connecté du tout et n'a pas demandé ?mode=structure, on affiche l'onglet citoyen par défaut
+      if (!user) {
+        setActiveTab("citoyen");
+      }
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user && isAutorite) {
       navigate({ to: "/dashboard" });
     }
-  }, [user, isAutorite, activeTab, navigate]);
+  }, [user, isAutorite, navigate]);
 
   const signInAnonymous = async () => {
     setLoading(true);

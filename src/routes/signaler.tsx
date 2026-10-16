@@ -14,7 +14,7 @@ import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon
 import { Badge } from "@/components/ui/badge";
 import { manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
 import { isInAbidjan, calculateDistanceMeters, formatDistance } from "@/lib/abidjan";
-import { classifyImageServerFn } from "@/lib/classify-image-fn";
+import { classifyImageServerFn, compareDuplicateImagesServerFn } from "@/lib/classify-image-fn";
 
 type NearbyDuplicate = {
   id: string;
@@ -23,6 +23,7 @@ type NearbyDuplicate = {
   photo_url: string | null;
   distance: number;
   votes_count: number;
+  similarity_reason?: string;
 };
 
 export const Route = createFileRoute("/signaler")({
@@ -47,6 +48,7 @@ function SignalerPage() {
   const [facesBlurred, setFacesBlurred] = useState<number | null>(null);
   const [imageRejected, setImageRejected] = useState<string | null>(null);
   const [nearbyDuplicate, setNearbyDuplicate] = useState<NearbyDuplicate | null>(null);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [duplicateIgnored, setDuplicateIgnored] = useState(false);
   const [confirmingDuplicate, setConfirmingDuplicate] = useState(false);
 
@@ -54,53 +56,90 @@ function SignalerPage() {
     if (!authLoading && !user) navigate({ to: "/login" });
   }, [user, authLoading, navigate]);
 
-  // Détection en temps réel des signalements identiques existants dans un rayon de 100m
+  // Détection intelligente de doublons : Proximité GPS + Similitude visuelle de l'image par l'IA (repères urbains + problème)
   useEffect(() => {
-    if (!coords || !category || duplicateIgnored) return;
+    if (!coords || !category || !photo || duplicateIgnored) {
+      if (!photo) setNearbyDuplicate(null);
+      return;
+    }
 
     let isMounted = true;
     (async () => {
+      setCheckingDuplicate(true);
       try {
         const { data } = await supabase
           .from("reports")
           .select("id, category, description, photo_url, latitude, longitude, votes_count, status")
           .eq("category", category)
           .neq("status", "resolu")
+          .not("photo_url", "is", null)
           .limit(30);
 
-        if (!data || data.length === 0 || !isMounted) return;
-
-        let closest: NearbyDuplicate | null = null;
-        let minD = 100; // Rayon de 100 mètres max
-
-        for (const rep of data) {
-          if (!rep.latitude || !rep.longitude) continue;
-          const d = calculateDistanceMeters(coords.lat, coords.lng, rep.latitude, rep.longitude);
-          if (d < minD) {
-            minD = d;
-            closest = {
-              id: rep.id,
-              category: rep.category as Category,
-              description: rep.description,
-              photo_url: rep.photo_url,
-              distance: Math.round(d),
-              votes_count: rep.votes_count,
-            };
-          }
+        if (!data || data.length === 0 || !isMounted) {
+          if (isMounted) setNearbyDuplicate(null);
+          return;
         }
 
-        if (isMounted) {
-          setNearbyDuplicate(closest);
+        // 1. Filtrer d'abord les signalements situés dans la même zone géographique (rayon de 150m)
+        const nearbyCandidates = data
+          .filter((rep) => rep.latitude && rep.longitude && rep.photo_url)
+          .map((rep) => ({
+            id: rep.id,
+            category: rep.category as Category,
+            description: rep.description,
+            photo_url: rep.photo_url as string,
+            distance: Math.round(
+              calculateDistanceMeters(coords.lat, coords.lng, rep.latitude!, rep.longitude!)
+            ),
+            votes_count: rep.votes_count,
+          }))
+          .filter((rep) => rep.distance <= 150)
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 3);
+
+        if (nearbyCandidates.length === 0 || !isMounted) {
+          if (isMounted) setNearbyDuplicate(null);
+          return;
+        }
+
+        // 2. Comparer visuellement par l'IA la nouvelle photo avec les photos des signalements proches
+        // (Vérifie que l'image montre bien le même endroit/repère comme une pharmacie, un bâtiment et le même problème)
+        const newImageBase64 = await fileToBase64(photo);
+        const comparison = await compareDuplicateImagesServerFn({
+          data: {
+            newImageBase64,
+            newMimeType: photo.type || "image/jpeg",
+            candidates: nearbyCandidates,
+          },
+        });
+
+        if (!isMounted) return;
+
+        if (comparison.is_duplicate && comparison.matched_report_id) {
+          const matched = nearbyCandidates.find((c) => c.id === comparison.matched_report_id);
+          if (matched) {
+            setNearbyDuplicate({
+              ...matched,
+              similarity_reason: comparison.similarity_reason,
+            });
+          } else {
+            setNearbyDuplicate(null);
+          }
+        } else {
+          setNearbyDuplicate(null);
         }
       } catch (err) {
         console.warn("Erreur vérification doublons :", err);
+      } finally {
+        if (isMounted) setCheckingDuplicate(false);
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [coords?.lat, coords?.lng, category, duplicateIgnored]);
+  }, [coords?.lat, coords?.lng, category, photo, duplicateIgnored]);
+
 
   const confirmDuplicate = async () => {
     if (!user || !nearbyDuplicate) return;
@@ -343,6 +382,13 @@ function SignalerPage() {
             </div>
           </Card>
 
+          {checkingDuplicate && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50/50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+              <span>L'IA compare votre photo avec les signalements proches pour vérifier s'il s'agit du même endroit…</span>
+            </div>
+          )}
+
           {nearbyDuplicate && (
             <Card className="border-2 border-amber-400 bg-amber-50/90 p-4 shadow-sm dark:border-amber-700 dark:bg-amber-950/50">
               <div className="flex items-start gap-3">
@@ -350,16 +396,24 @@ function SignalerPage() {
                   <AlertTriangle className="h-5 w-5" />
                 </div>
                 <div className="flex-1 space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <h3 className="font-bold text-amber-950 dark:text-amber-100 text-sm">
-                      Problème similaire déjà signalé à {formatDistance(nearbyDuplicate.distance)} !
+                      Doublon détecté par l'IA (même lieu & similitude visuelle) !
                     </h3>
-                    <Badge variant="outline" className="border-amber-400 text-amber-800 dark:text-amber-200">
+                    <Badge variant="outline" className="border-amber-400 text-amber-800 dark:text-amber-200 shrink-0">
                       {formatDistance(nearbyDuplicate.distance)}
                     </Badge>
                   </div>
+                  {nearbyDuplicate.similarity_reason && (
+                    <div className="flex items-start gap-1.5 rounded bg-amber-100/80 px-2.5 py-1.5 text-[11px] font-medium text-amber-900 dark:bg-amber-900/50 dark:text-amber-100">
+                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-700 mt-0.5" />
+                      <span>
+                        <strong>Analyse visuelle IA :</strong> {nearbyDuplicate.similarity_reason}
+                      </span>
+                    </div>
+                  )}
                   <p className="text-amber-900 dark:text-amber-200 font-medium">
-                    « {nearbyDuplicate.description} »
+                    Signalement existant : « {nearbyDuplicate.description} »
                   </p>
                   {nearbyDuplicate.photo_url && (
                     <img
@@ -369,7 +423,7 @@ function SignalerPage() {
                     />
                   )}
                   <p className="text-[11px] text-amber-800/90 dark:text-amber-300">
-                    Pour éviter les doublons et donner plus de poids à l'alerte auprès de la mairie, vous pouvez confirmer ce signalement existant (+1) plutôt que d'en créer un second.
+                    L'IA a reconnu les mêmes repères visuels et la même localisation. Cliquez sur <strong>« Confirmer ce problème (+1) »</strong> pour appuyer ce signalement auprès de la mairie plutôt que de créer un doublon.
                   </p>
                   <div className="flex flex-wrap items-center gap-2 pt-2">
                     <Button
@@ -396,13 +450,14 @@ function SignalerPage() {
                       }}
                       className="border-amber-300 bg-white/60 text-xs hover:bg-white dark:bg-black/30"
                     >
-                      C'est un problème différent, continuer
+                      C'est un autre endroit, continuer
                     </Button>
                   </div>
                 </div>
               </div>
             </Card>
           )}
+
 
           <Card className="p-4">
             <Label htmlFor="desc">Description</Label>

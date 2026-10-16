@@ -160,35 +160,11 @@ export function ReportCard({ report, hasVoted, onVoteChange, distanceMeters }: {
           </div>
         </div>
         <p className="text-sm">{report.description}</p>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {report.ville && (
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <MapPin className="h-3 w-3" /> {report.ville}
-            </div>
-          )}
-          {distanceMeters !== undefined && (
-            <Badge
-              variant="outline"
-              className={`gap-1 font-medium ${
-                distanceMeters < 500
-                  ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
-                  : distanceMeters < 2500
-                  ? "border-blue-400 bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-200"
-                  : "text-muted-foreground"
-              }`}
-            >
-              <MapPin className="h-3 w-3 text-primary" />
-              {distanceMeters < 300
-                ? `Tout près (à ${formatDistance(distanceMeters)})`
-                : `À ${formatDistance(distanceMeters)}`}
-            </Badge>
-          )}
-          {report.votes_count > 0 && (
-            <Badge variant="secondary" className="gap-1 text-[11px] font-normal">
-              👍 {report.votes_count} citoyen{report.votes_count > 1 ? "s" : ""} confirme{report.votes_count > 1 ? "nt" : ""}
-            </Badge>
-          )}
-        </div>
+        {report.ville && (
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <MapPin className="h-3 w-3" /> {report.ville}
+          </div>
+        )}
 
         <div className="flex items-center gap-2 border-t pt-2 text-xs">
           <span className="text-muted-foreground">Vérification :</span>

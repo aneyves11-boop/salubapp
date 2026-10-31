@@ -24,7 +24,6 @@ import {
   Map as MapIcon,
   Navigation,
   X,
-  Info,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
@@ -57,7 +56,21 @@ type NearbyDuplicate = {
   similarity_reason?: string;
 };
 
+type LocationMode = "current" | "address" | "map";
 type LocationSource = "gps" | "photo" | "address" | "map";
+
+const QUICK_COMMUNE_QUERIES = [
+  "Yopougon",
+  "Cocody",
+  "Bingerville",
+  "Abobo",
+  "Adjamé",
+  "Marcory",
+  "Koumassi",
+  "Treichville",
+  "Port-Bouët",
+  "Plateau",
+] as const;
 
 export const Route = createFileRoute("/signaler")({
   head: () => ({ meta: [{ title: "Nouveau signalement — SalubApp" }] }),
@@ -73,15 +86,14 @@ function SignalerPage() {
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
-  // États de localisation (GPS direct, EXIF photo, Adresse saisie ou Carte interactive)
+  // Par défaut : mode "Ma position actuelle" (rien n'est déroulé tant que l'utilisateur ne change pas d'option)
+  const [locationMode, setLocationMode] = useState<LocationMode>("current");
+  const [locationSource, setLocationSource] = useState<LocationSource>("gps");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [liveGpsCoords, setLiveGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoState, setGeoState] = useState<"idle" | "loading" | "ok" | "error">("idle");
-  const [locationSource, setLocationSource] = useState<LocationSource | null>(null);
-  const [locationInputMode, setLocationInputMode] = useState<"address" | "map">("address");
-  const [exifCapturedAt, setExifCapturedAt] = useState<string | null>(null);
-  const [photoMissingExif, setPhotoMissingExif] = useState(false);
 
-  // Recherche d'adresse (Option 2 par défaut)
+  // États pour l'option "Saisir l'adresse"
   const [addressQuery, setAddressQuery] = useState("");
   const [addressResults, setAddressResults] = useState<GeocodedPlace[]>(() =>
     searchLocalAbidjanPlaces("")
@@ -90,7 +102,6 @@ function SignalerPage() {
   const [addressFocused, setAddressFocused] = useState(false);
   const [selectedPlaceLabel, setSelectedPlaceLabel] = useState<string | null>(null);
 
-  // Empêche le GPS automatique au chargement d'écraser le GPS d'une photo ou une adresse déjà choisie
   const locationLockRef = useRef<LocationSource | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
@@ -108,8 +119,9 @@ function SignalerPage() {
     if (!authLoading && !user) navigate({ to: "/login" });
   }, [user, authLoading, navigate]);
 
-  // Recherche dynamique d'adresses et de quartiers dans le Grand Abidjan
+  // Autocomplétion d'adresses uniquement quand le mode "address" est ouvert
   useEffect(() => {
+    if (locationMode !== "address") return;
     const q = addressQuery.trim();
     if (!q) {
       setAddressResults(searchLocalAbidjanPlaces(""));
@@ -117,9 +129,7 @@ function SignalerPage() {
       return;
     }
 
-    // Affichage immédiat des correspondances locales
     setAddressResults(searchLocalAbidjanPlaces(q));
-
     if (q.length < 2) return;
 
     const controller = new AbortController();
@@ -141,7 +151,7 @@ function SignalerPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [addressQuery]);
+  }, [addressQuery, locationMode]);
 
   // Détection intelligente de doublons : Proximité GPS + Similitude visuelle de l'image par l'IA
   useEffect(() => {
@@ -260,35 +270,49 @@ function SignalerPage() {
   const askLocation = (isInitialAuto = false) => {
     if (!isInitialAuto) {
       locationLockRef.current = null;
+      setLocationMode("current");
+      setSelectedPlaceLabel(null);
+      // Si la position live était déjà en mémoire, on l'affiche tout de suite pendant le rafraîchissement
+      if (liveGpsCoords) {
+        setCoords(liveGpsCoords);
+        setLocationSource("gps");
+        setGeoState("ok");
+        const c = detectCommuneFromCoords(liveGpsCoords.lat, liveGpsCoords.lng);
+        if (c) setVille(c);
+      }
     }
+
     if (!navigator.geolocation) {
       if (!locationLockRef.current) setGeoState("error");
-      if (!isInitialAuto) toast.error("Géolocalisation non disponible sur cet appareil");
+      if (!isInitialAuto) toast.error("Géolocalisation non disponible");
       return;
     }
-    if (!locationLockRef.current) {
+
+    if (!locationLockRef.current && !liveGpsCoords) {
       setGeoState("loading");
     }
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        // Si l'utilisateur a entre-temps chargé une photo avec EXIF ou choisi une adresse/carte, on la préserve
-        if (isInitialAuto && locationLockRef.current) return;
-
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
+        if (isInAbidjan(lat, lng)) {
+          setLiveGpsCoords({ lat, lng });
+        }
+
+        if (isInitialAuto && locationLockRef.current) return;
+
         if (!isInAbidjan(lat, lng)) {
-          if (!locationLockRef.current) {
-            setCoords(null);
-            setGeoState("error");
-          }
+          setCoords(null);
+          setGeoState("error");
           if (!isInitialAuto) {
-            toast.error("Hors zone Abidjan", {
-              description:
-                "Votre position actuelle est hors du Grand Abidjan. Saisissez l'adresse du problème ou indiquez-la sur la carte.",
+            toast.error("Hors zone", {
+              description: "Votre position actuelle est hors du périmètre d'Abidjan.",
             });
           }
           return;
         }
+
         setCoords({ lat, lng });
         setGeoState("ok");
         setLocationSource("gps");
@@ -297,19 +321,14 @@ function SignalerPage() {
         if (detectedCommune) {
           setVille((prev) => (!isInitialAuto || prev.trim().length === 0 ? detectedCommune : prev));
         }
-        if (!isInitialAuto) {
-          toast.success("Position GPS actuelle activée", {
-            description: detectedCommune ? `Commune détectée : ${detectedCommune}` : undefined,
-          });
-        }
       },
       (err) => {
         if (isInitialAuto && locationLockRef.current) return;
-        setGeoState("error");
+        if (!liveGpsCoords) {
+          setGeoState("error");
+        }
         if (!isInitialAuto) {
-          toast.error("Position GPS indisponible", {
-            description: `${err.message}. Vous pouvez saisir l'adresse ou utiliser la carte ci-dessous.`,
-          });
+          toast.error("Position impossible", { description: err.message });
         }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
@@ -330,18 +349,17 @@ function SignalerPage() {
     setAddressQuery(place.label);
     setAddressFocused(false);
     const detected = place.commune ?? detectCommuneFromCoords(place.lat, place.lng);
-    setVille(detected && !place.label.toLowerCase().includes(detected.toLowerCase())
-      ? `${detected} — ${place.label}`
-      : place.label);
-    toast.success("Lieu enregistré", {
-      description: `${place.label}${detected ? ` (${detected})` : ""}`,
-    });
+    setVille(
+      detected && !place.label.toLowerCase().includes(detected.toLowerCase())
+        ? `${detected} — ${place.label}`
+        : place.label
+    );
   };
 
   const handleManualAddressSubmit = async () => {
     const q = addressQuery.trim();
     if (!q) {
-      toast.error("Entrez un quartier, une commune ou un repère (ex: Yopougon Siporex)");
+      toast.error("Saisissez une commune, un quartier ou un repère");
       return;
     }
     setSearchingAddress(true);
@@ -351,7 +369,7 @@ function SignalerPage() {
       if (results.length > 0) {
         selectAddressPlace(results[0]);
       } else {
-        toast.error("Adresse introuvable dans le Grand Abidjan", {
+        toast.error("Lieu introuvable dans le Grand Abidjan", {
           description: "Essayez un quartier connu ou cliquez sur « Indiquer à travers une carte ».",
         });
       }
@@ -364,8 +382,6 @@ function SignalerPage() {
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setAiSuggestion(null);
     setFacesBlurred(null);
-    setExifCapturedAt(null);
-    setPhotoMissingExif(false);
     if (!file) {
       setPhoto(null);
       setPhotoPreview(null);
@@ -373,39 +389,20 @@ function SignalerPage() {
     }
     setImageRejected(null);
 
-    // 1. Lecture immédiate des métadonnées EXIF GPS contenues dans la photo originale
-    // (avant tout passage par un canvas qui purge les métadonnées EXIF)
+    // Lecture silencieuse du GPS EXIF s'il est présent dans l'image (aucune bande d'erreur si absent)
     const exif = await extractExifGps(file);
-    if (exif) {
-      if (isInAbidjan(exif.lat, exif.lng)) {
-        locationLockRef.current = "photo";
-        setCoords({ lat: exif.lat, lng: exif.lng });
-        setGeoState("ok");
-        setLocationSource("photo");
-        setExifCapturedAt(exif.capturedAt ?? null);
-        setSelectedPlaceLabel(null);
-        const detectedCommune = detectCommuneFromCoords(exif.lat, exif.lng);
-        if (detectedCommune) {
-          setVille(detectedCommune);
-        }
-        toast.success("📍 Localisation extraite de la photo !", {
-          description: detectedCommune
-            ? `Lieu où la photo a été prise : ${detectedCommune}`
-            : "Les coordonnées GPS enregistrées dans la photo ont été récupérées.",
-        });
-      } else {
-        setPhotoMissingExif(true);
-        toast.error("GPS de la photo hors Abidjan", {
-          description:
-            "Les coordonnées intégrées à cette photo sont hors du Grand Abidjan. Précisez l'adresse ci-dessous si besoin.",
-        });
+    if (exif && isInAbidjan(exif.lat, exif.lng) && locationMode === "current") {
+      locationLockRef.current = "photo";
+      setCoords({ lat: exif.lat, lng: exif.lng });
+      setGeoState("ok");
+      setLocationSource("photo");
+      setSelectedPlaceLabel(null);
+      const detectedCommune = detectCommuneFromCoords(exif.lat, exif.lng);
+      if (detectedCommune) {
+        setVille(detectedCommune);
       }
-    } else {
-      // Aucune variable GPS trouvée dans l'image : on invite l'utilisateur à vérifier / saisir l'adresse s'il n'est plus sur place
-      setPhotoMissingExif(true);
     }
 
-    // 2. Affichage et analyse IA + floutage automatique des visages
     setPhoto(file);
     setPhotoPreview(URL.createObjectURL(file));
     void analyzePhoto(file);
@@ -527,9 +524,7 @@ function SignalerPage() {
       return;
     }
     if (!coords) {
-      toast.error("Localisation requise", {
-        description: "Saisissez l'adresse du lieu ou indiquez-le sur la carte.",
-      });
+      toast.error("Localisation requise");
       return;
     }
     if (!isInAbidjan(coords.lat, coords.lng)) {
@@ -589,7 +584,7 @@ function SignalerPage() {
         </Link>
         <h1 className="mb-1 text-2xl font-bold">Nouveau signalement</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          Remplissez en moins d'une minute. Vous pouvez aussi importer une photo prise plus tôt hors connexion.
+          Remplissez en moins d'une minute. Photo et position aident énormément.
         </p>
 
         <div className="space-y-5">
@@ -710,6 +705,19 @@ function SignalerPage() {
           )}
 
           <Card className="p-4">
+            <Label htmlFor="desc">Description</Label>
+            <Textarea
+              id="desc"
+              value={description}
+              maxLength={1000}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ex : tas d'ordures depuis 3 jours devant l'école..."
+              className="mt-1.5 min-h-24"
+            />
+            <div className="mt-1 text-right text-xs text-muted-foreground">{description.length}/1000</div>
+          </Card>
+
+          <Card className="p-4">
             <Label className="mb-2 block">Photo (recommandé)</Label>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/50">
@@ -735,19 +743,9 @@ function SignalerPage() {
               </label>
             </div>
             <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-              <ShieldCheck className="h-3 w-3 shrink-0" /> Les visages sont automatiquement floutés avant l'envoi. Si
-              la photo contient une position GPS, elle est récupérée automatiquement.
+              <ShieldCheck className="h-3 w-3 shrink-0" /> Les visages sont automatiquement floutés sur votre appareil
+              avant l'envoi.
             </p>
-            {locationSource === "photo" && coords && (
-              <div className="mt-2 flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50/80 px-2.5 py-1.5 text-xs font-medium text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                <span>
-                  Position GPS extraite de la photo
-                  {detectedCommuneLabel ? ` (${detectedCommuneLabel})` : ""}
-                  {exifCapturedAt ? ` · prise le ${exifCapturedAt}` : ""}
-                </span>
-              </div>
-            )}
             {(blurring || analyzing) && (
               <div className="mt-2 flex items-center gap-2 text-xs font-medium text-primary">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyse IA & floutage automatique des visages en cours…
@@ -811,74 +809,64 @@ function SignalerPage() {
             )}
           </Card>
 
-          <Card className="p-4">
-            <Label htmlFor="desc">Description</Label>
-            <Textarea
-              id="desc"
-              value={description}
-              maxLength={1000}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ex : tas d'ordures depuis 3 jours devant l'école..."
-              className="mt-1.5 min-h-24"
-            />
-            <div className="mt-1 text-right text-xs text-muted-foreground">{description.length}/1000</div>
-          </Card>
+          {/* UNE SEULE BANDE PROPRE : LOCALISATION DU PROBLÈME (par défaut sur Ma position actuelle) */}
+          <Card className="space-y-3 p-4">
+            <Label className="block">Localisation du problème</Label>
 
-          {/* CARTE DE LOCALISATION : 1) EXIF Photo / GPS auto, 2) Champ d'adresse affiché d'emblée, et option Carte en bas */}
-          <Card className="space-y-4 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label className="text-sm font-semibold">Localisation du problème</Label>
-              {locationSource && coords && (
-                <Badge variant="secondary" className="text-[11px]">
-                  {locationSource === "photo" && "📸 Extraite de la photo"}
-                  {locationSource === "address" && "🏠 Adresse saisie"}
-                  {locationSource === "map" && "🗺️ Pointée sur la carte"}
-                  {locationSource === "gps" && "📡 Position actuelle"}
-                </Badge>
-              )}
-            </div>
-
-            {/* État de la localisation active */}
+            {/* Affichage simple de la position (comme avant) */}
             {geoState === "loading" && !coords && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Détection de la position en cours…
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Localisation en cours…
               </div>
             )}
 
             {coords && (
-              <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5 text-xs text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold">
-                    {selectedPlaceLabel
-                      ? selectedPlaceLabel
-                      : detectedCommuneLabel
-                      ? `Commune détectée : ${detectedCommuneLabel}`
-                      : "Position enregistrée dans le Grand Abidjan"}
-                  </div>
-                  <div className="text-[11px] opacity-80">
-                    GPS : {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {photoMissingExif && (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <div className="flex items-center gap-2 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
                 <span>
-                  Cette photo ne contenait pas de variable GPS intégrée. Si vous n'êtes plus sur le lieu du problème,
-                  entrez l'adresse ci-dessous ou indiquez-le via la carte.
+                  {locationSource === "address" && selectedPlaceLabel
+                    ? `${selectedPlaceLabel} (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`
+                    : locationSource === "photo"
+                    ? `Position extraite de la photo${detectedCommuneLabel ? ` — ${detectedCommuneLabel}` : ""} (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`
+                    : `Position acquise${detectedCommuneLabel ? ` — ${detectedCommuneLabel}` : ""} (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`}
                 </span>
               </div>
             )}
 
-            {/* MODE PAR DÉFAUT : Saisir directement l'adresse (sans imposer la carte d'emblée) */}
-            {locationInputMode === "address" && (
-              <div className="space-y-2">
-                <Label htmlFor="address-search" className="text-xs text-muted-foreground">
-                  Vous n'êtes plus sur place ou sans GPS ? Entrez l'adresse, le quartier ou un repère connu :
-                </Label>
+            {geoState === "error" && !coords && (
+              <p className="text-xs text-destructive">
+                Position actuelle non disponible ou hors d'Abidjan. Choisissez « Saisir l'adresse » ou « Indiquer à travers une carte » ci-dessous.
+              </p>
+            )}
+
+            {/* DÉROULÉ UNIQUEMENT SI L'UTILISATEUR CLIQUE SUR "SAISIR L'ADRESSE" */}
+            {locationMode === "address" && (
+              <div className="space-y-2.5 pt-1">
+                <div className="flex flex-wrap gap-1">
+                  {QUICK_COMMUNE_QUERIES.map((communeName) => (
+                    <button
+                      key={communeName}
+                      type="button"
+                      onClick={() => {
+                        setAddressQuery(communeName);
+                        const matches = searchLocalAbidjanPlaces(communeName);
+                        setAddressResults(matches);
+                        if (matches.length > 0) {
+                          selectAddressPlace(matches[0]);
+                        }
+                        setAddressFocused(true);
+                      }}
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition ${
+                        detectedCommuneLabel === communeName && locationSource === "address"
+                          ? "bg-emerald-700 text-white"
+                          : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+                      }`}
+                    >
+                      {communeName}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="relative">
                   <div className="flex gap-2">
                     <div className="relative flex-1">
@@ -916,18 +904,14 @@ function SignalerPage() {
                       size="sm"
                       disabled={searchingAddress}
                       onClick={() => void handleManualAddressSubmit()}
-                      className="shrink-0 h-9 px-3 text-xs font-semibold"
+                      className="h-9 shrink-0 px-3 text-xs font-semibold"
                     >
                       {searchingAddress ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Valider"}
                     </Button>
                   </div>
 
-                  {/* Liste de suggestions d'adresses / quartiers d'Abidjan */}
                   {addressFocused && addressResults.length > 0 && (
                     <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-auto rounded-lg border bg-popover p-1 shadow-md">
-                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {addressQuery.trim() ? "Lieux trouvés dans le Grand Abidjan" : "Quartiers & repères fréquents"}
-                      </div>
                       {addressResults.map((place) => (
                         <button
                           key={place.id}
@@ -951,83 +935,63 @@ function SignalerPage() {
               </div>
             )}
 
-            {/* MODE CARTE : Affiché uniquement si l'utilisateur choisit l'option carte en bas */}
-            {locationInputMode === "map" && (
-              <Suspense
-                fallback={
-                  <div className="flex h-64 items-center justify-center rounded-xl border bg-muted text-xs text-muted-foreground">
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Chargement de la carte…
-                  </div>
-                }
-              >
-                <LocationPickerMap
-                  coords={coords}
-                  onSelectLocation={(lat, lng, commune) => {
-                    locationLockRef.current = "map";
-                    setCoords({ lat, lng });
-                    setGeoState("ok");
-                    setLocationSource("map");
-                    setSelectedPlaceLabel(null);
-                    if (commune) {
-                      setVille((prev) => (prev.trim().length === 0 ? commune : prev));
-                    }
-                  }}
-                />
-              </Suspense>
+            {/* DÉROULÉ UNIQUEMENT SI L'UTILISATEUR CLIQUE SUR "INDIQUER À TRAVERS UNE CARTE" */}
+            {locationMode === "map" && (
+              <div className="pt-1">
+                <Suspense
+                  fallback={
+                    <div className="flex h-64 items-center justify-center rounded-xl border bg-muted text-xs text-muted-foreground">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Chargement de la carte…
+                    </div>
+                  }
+                >
+                  <LocationPickerMap
+                    coords={coords}
+                    onSelectLocation={(lat, lng, commune) => {
+                      locationLockRef.current = "map";
+                      setCoords({ lat, lng });
+                      setGeoState("ok");
+                      setLocationSource("map");
+                      setSelectedPlaceLabel(null);
+                      if (commune) setVille(commune);
+                    }}
+                  />
+                </Suspense>
+              </div>
             )}
 
-            {/* Champ complémentaire optionnel pour préciser un repère exact aux équipes de la mairie */}
-            <div>
-              <Label htmlFor="ville" className="text-xs text-muted-foreground">
-                Précision de repère pour la mairie (optionnel)
-              </Label>
-              <Input
-                id="ville"
-                value={ville}
-                onChange={(e) => setVille(e.target.value)}
-                placeholder="Ex : Derrière la pharmacie Siporex, près de l'école…"
-                className="mt-1 text-xs sm:text-sm"
-                maxLength={100}
-              />
-            </div>
-
-            {/* BARRE D'OPTIONS EN BAS : Saisir l'adresse OU Indiquer à travers une carte (ou Position actuelle) */}
-            <div className="border-t pt-3">
-              <p className="mb-2 text-[11px] font-medium text-muted-foreground">
-                Vous ne connaissez pas l'adresse exacte ? Choisissez comment indiquer le lieu :
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={locationInputMode === "address" ? "default" : "outline"}
-                  onClick={() => setLocationInputMode("address")}
-                  className="gap-1.5 text-xs"
-                >
-                  <Search className="h-3.5 w-3.5" />
-                  Saisir l'adresse
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={locationInputMode === "map" ? "default" : "outline"}
-                  onClick={() => setLocationInputMode("map")}
-                  className="gap-1.5 text-xs"
-                >
-                  <MapIcon className="h-3.5 w-3.5" />
-                  Indiquer à travers une carte
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => askLocation(false)}
-                  className="gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <Navigation className="h-3.5 w-3.5" />
-                  Ma position actuelle
-                </Button>
-              </div>
+            {/* LES 3 OPTIONS EN BAS (avec "Ma position actuelle" sélectionné par défaut) */}
+            <div className="flex flex-wrap gap-2 border-t pt-3">
+              <Button
+                type="button"
+                size="sm"
+                variant={locationMode === "current" ? "default" : "outline"}
+                onClick={() => askLocation(false)}
+                className="gap-1.5 text-xs"
+              >
+                <Navigation className="h-3.5 w-3.5" />
+                Ma position actuelle
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={locationMode === "address" ? "default" : "outline"}
+                onClick={() => setLocationMode("address")}
+                className="gap-1.5 text-xs"
+              >
+                <Search className="h-3.5 w-3.5" />
+                Saisir l'adresse
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={locationMode === "map" ? "default" : "outline"}
+                onClick={() => setLocationMode("map")}
+                className="gap-1.5 text-xs"
+              >
+                <MapIcon className="h-3.5 w-3.5" />
+                Indiquer à travers une carte
+              </Button>
             </div>
           </Card>
 

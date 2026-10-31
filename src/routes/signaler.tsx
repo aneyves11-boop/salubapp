@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { AppHeader } from "@/components/AppHeader";
@@ -10,12 +10,42 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { toast } from "sonner";
-import { Camera, MapPin, Loader2, CheckCircle2, Sparkles, ShieldCheck, ImageIcon, AlertTriangle, ThumbsUp } from "lucide-react";
+import {
+  Camera,
+  MapPin,
+  Loader2,
+  CheckCircle2,
+  Sparkles,
+  ShieldCheck,
+  ImageIcon,
+  AlertTriangle,
+  ThumbsUp,
+  Search,
+  Map as MapIcon,
+  Navigation,
+  X,
+  Info,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { manualBlurAtCoords, blurBoxesOnImage } from "@/lib/face-blur";
-import { isInAbidjan, calculateDistanceMeters, formatDistance, detectCommuneFromCoords } from "@/lib/abidjan";
+import {
+  isInAbidjan,
+  calculateDistanceMeters,
+  formatDistance,
+  detectCommuneFromCoords,
+} from "@/lib/abidjan";
+import { extractExifGps } from "@/lib/exif-gps";
+import {
+  searchAbidjanAddresses,
+  searchLocalAbidjanPlaces,
+  type GeocodedPlace,
+} from "@/lib/geocoding";
 import { classifyImageServerFn, compareDuplicateImagesServerFn } from "@/lib/classify-image-fn";
 import { fetchSyncedStatuses } from "@/lib/status-sync";
+
+const LocationPickerMap = lazy(() =>
+  import("@/components/LocationPickerMap").then((m) => ({ default: m.LocationPickerMap }))
+);
 
 type NearbyDuplicate = {
   id: string;
@@ -26,6 +56,8 @@ type NearbyDuplicate = {
   votes_count: number;
   similarity_reason?: string;
 };
+
+type LocationSource = "gps" | "photo" | "address" | "map";
 
 export const Route = createFileRoute("/signaler")({
   head: () => ({ meta: [{ title: "Nouveau signalement — SalubApp" }] }),
@@ -40,8 +72,27 @@ function SignalerPage() {
   const [ville, setVille] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+  // États de localisation (GPS direct, EXIF photo, Adresse saisie ou Carte interactive)
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geoState, setGeoState] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [locationSource, setLocationSource] = useState<LocationSource | null>(null);
+  const [locationInputMode, setLocationInputMode] = useState<"address" | "map">("address");
+  const [exifCapturedAt, setExifCapturedAt] = useState<string | null>(null);
+  const [photoMissingExif, setPhotoMissingExif] = useState(false);
+
+  // Recherche d'adresse (Option 2 par défaut)
+  const [addressQuery, setAddressQuery] = useState("");
+  const [addressResults, setAddressResults] = useState<GeocodedPlace[]>(() =>
+    searchLocalAbidjanPlaces("")
+  );
+  const [searchingAddress, setSearchingAddress] = useState(false);
+  const [addressFocused, setAddressFocused] = useState(false);
+  const [selectedPlaceLabel, setSelectedPlaceLabel] = useState<string | null>(null);
+
+  // Empêche le GPS automatique au chargement d'écraser le GPS d'une photo ou une adresse déjà choisie
+  const locationLockRef = useRef<LocationSource | null>(null);
+
   const [submitting, setSubmitting] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<{ category: Category; confidence: number } | null>(null);
@@ -57,7 +108,42 @@ function SignalerPage() {
     if (!authLoading && !user) navigate({ to: "/login" });
   }, [user, authLoading, navigate]);
 
-  // Détection intelligente de doublons : Proximité GPS + Similitude visuelle de l'image par l'IA (repères urbains + problème)
+  // Recherche dynamique d'adresses et de quartiers dans le Grand Abidjan
+  useEffect(() => {
+    const q = addressQuery.trim();
+    if (!q) {
+      setAddressResults(searchLocalAbidjanPlaces(""));
+      setSearchingAddress(false);
+      return;
+    }
+
+    // Affichage immédiat des correspondances locales
+    setAddressResults(searchLocalAbidjanPlaces(q));
+
+    if (q.length < 2) return;
+
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setSearchingAddress(true);
+      try {
+        const merged = await searchAbidjanAddresses(q, controller.signal);
+        if (!controller.signal.aborted) {
+          setAddressResults(merged);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setSearchingAddress(false);
+        }
+      }
+    }, 280);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [addressQuery]);
+
+  // Détection intelligente de doublons : Proximité GPS + Similitude visuelle de l'image par l'IA
   useEffect(() => {
     if (!coords || !category || !photo || duplicateIgnored) {
       if (!photo) setNearbyDuplicate(null);
@@ -84,7 +170,6 @@ function SignalerPage() {
           return;
         }
 
-        // 1. Filtrer d'abord les signalements actifs situés dans la même zone géographique (rayon de 150m)
         const nearbyCandidates = data
           .filter((rep) => {
             const effectiveStatus = syncedStatuses[rep.id]?.status ?? rep.status;
@@ -115,8 +200,6 @@ function SignalerPage() {
           return;
         }
 
-        // 2. Comparer visuellement par l'IA la nouvelle photo avec les photos des signalements proches
-        // (Vérifie que l'image montre bien le même endroit/repère comme une pharmacie, un bâtiment et le même problème)
         const newImageBase64 = await fileToBase64(photo);
         const comparison = await compareDuplicateImagesServerFn({
           data: {
@@ -153,7 +236,6 @@ function SignalerPage() {
     };
   }, [coords?.lat, coords?.lng, category, photo, duplicateIgnored]);
 
-
   const confirmDuplicate = async () => {
     if (!user || !nearbyDuplicate) return;
     setConfirmingDuplicate(true);
@@ -175,41 +257,155 @@ function SignalerPage() {
     }
   };
 
-  const askLocation = () => {
-    if (!navigator.geolocation) { toast.error("Géolocalisation non disponible"); setGeoState("error"); return; }
-    setGeoState("loading");
+  const askLocation = (isInitialAuto = false) => {
+    if (!isInitialAuto) {
+      locationLockRef.current = null;
+    }
+    if (!navigator.geolocation) {
+      if (!locationLockRef.current) setGeoState("error");
+      if (!isInitialAuto) toast.error("Géolocalisation non disponible sur cet appareil");
+      return;
+    }
+    if (!locationLockRef.current) {
+      setGeoState("loading");
+    }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        // Si l'utilisateur a entre-temps chargé une photo avec EXIF ou choisi une adresse/carte, on la préserve
+        if (isInitialAuto && locationLockRef.current) return;
+
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         if (!isInAbidjan(lat, lng)) {
-          setCoords(null);
-          setGeoState("error");
-          toast.error("Hors zone", { description: "SalubApp est limité à Abidjan. Votre position actuelle est en dehors du périmètre couvert." });
+          if (!locationLockRef.current) {
+            setCoords(null);
+            setGeoState("error");
+          }
+          if (!isInitialAuto) {
+            toast.error("Hors zone Abidjan", {
+              description:
+                "Votre position actuelle est hors du Grand Abidjan. Saisissez l'adresse du problème ou indiquez-la sur la carte.",
+            });
+          }
           return;
         }
         setCoords({ lat, lng });
         setGeoState("ok");
+        setLocationSource("gps");
+        setSelectedPlaceLabel(null);
         const detectedCommune = detectCommuneFromCoords(lat, lng);
         if (detectedCommune) {
-          setVille((prev) => (prev.trim().length === 0 ? detectedCommune : prev));
+          setVille((prev) => (!isInitialAuto || prev.trim().length === 0 ? detectedCommune : prev));
+        }
+        if (!isInitialAuto) {
+          toast.success("Position GPS actuelle activée", {
+            description: detectedCommune ? `Commune détectée : ${detectedCommune}` : undefined,
+          });
         }
       },
-      (err) => { setGeoState("error"); toast.error("Position impossible", { description: err.message }); },
+      (err) => {
+        if (isInitialAuto && locationLockRef.current) return;
+        setGeoState("error");
+        if (!isInitialAuto) {
+          toast.error("Position GPS indisponible", {
+            description: `${err.message}. Vous pouvez saisir l'adresse ou utiliser la carte ci-dessous.`,
+          });
+        }
+      },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
     );
   };
 
-  useEffect(() => { askLocation(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    askLocation(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selectAddressPlace = (place: GeocodedPlace) => {
+    locationLockRef.current = "address";
+    setCoords({ lat: place.lat, lng: place.lng });
+    setGeoState("ok");
+    setLocationSource("address");
+    setSelectedPlaceLabel(place.label);
+    setAddressQuery(place.label);
+    setAddressFocused(false);
+    const detected = place.commune ?? detectCommuneFromCoords(place.lat, place.lng);
+    setVille(detected && !place.label.toLowerCase().includes(detected.toLowerCase())
+      ? `${detected} — ${place.label}`
+      : place.label);
+    toast.success("Lieu enregistré", {
+      description: `${place.label}${detected ? ` (${detected})` : ""}`,
+    });
+  };
+
+  const handleManualAddressSubmit = async () => {
+    const q = addressQuery.trim();
+    if (!q) {
+      toast.error("Entrez un quartier, une commune ou un repère (ex: Yopougon Siporex)");
+      return;
+    }
+    setSearchingAddress(true);
+    try {
+      const results = await searchAbidjanAddresses(q);
+      setAddressResults(results);
+      if (results.length > 0) {
+        selectAddressPlace(results[0]);
+      } else {
+        toast.error("Adresse introuvable dans le Grand Abidjan", {
+          description: "Essayez un quartier connu ou cliquez sur « Indiquer à travers une carte ».",
+        });
+      }
+    } finally {
+      setSearchingAddress(false);
+    }
+  };
 
   const handlePhoto = async (file: File | null) => {
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setAiSuggestion(null);
     setFacesBlurred(null);
-    if (!file) { setPhoto(null); setPhotoPreview(null); return; }
+    setExifCapturedAt(null);
+    setPhotoMissingExif(false);
+    if (!file) {
+      setPhoto(null);
+      setPhotoPreview(null);
+      return;
+    }
     setImageRejected(null);
 
-    // Affiche directement la photo en aperçu et délègue la détection haute précision à l'IA
+    // 1. Lecture immédiate des métadonnées EXIF GPS contenues dans la photo originale
+    // (avant tout passage par un canvas qui purge les métadonnées EXIF)
+    const exif = await extractExifGps(file);
+    if (exif) {
+      if (isInAbidjan(exif.lat, exif.lng)) {
+        locationLockRef.current = "photo";
+        setCoords({ lat: exif.lat, lng: exif.lng });
+        setGeoState("ok");
+        setLocationSource("photo");
+        setExifCapturedAt(exif.capturedAt ?? null);
+        setSelectedPlaceLabel(null);
+        const detectedCommune = detectCommuneFromCoords(exif.lat, exif.lng);
+        if (detectedCommune) {
+          setVille(detectedCommune);
+        }
+        toast.success("📍 Localisation extraite de la photo !", {
+          description: detectedCommune
+            ? `Lieu où la photo a été prise : ${detectedCommune}`
+            : "Les coordonnées GPS enregistrées dans la photo ont été récupérées.",
+        });
+      } else {
+        setPhotoMissingExif(true);
+        toast.error("GPS de la photo hors Abidjan", {
+          description:
+            "Les coordonnées intégrées à cette photo sont hors du Grand Abidjan. Précisez l'adresse ci-dessous si besoin.",
+        });
+      }
+    } else {
+      // Aucune variable GPS trouvée dans l'image : on invite l'utilisateur à vérifier / saisir l'adresse s'il n'est plus sur place
+      setPhotoMissingExif(true);
+    }
+
+    // 2. Affichage et analyse IA + floutage automatique des visages
     setPhoto(file);
     setPhotoPreview(URL.createObjectURL(file));
     void analyzePhoto(file);
@@ -255,7 +451,6 @@ function SignalerPage() {
         data: { imageBase64, mimeType: file.type || "image/jpeg" },
       });
 
-      // 1. Floutage 100% AUTOMATIQUE par l'IA : ciblage chirurgical des visages uniquement
       if (result.faces && result.faces.length > 0) {
         try {
           const autoBlurred = await blurBoxesOnImage(file, result.faces);
@@ -323,15 +518,30 @@ function SignalerPage() {
 
   const submit = async () => {
     if (!user) return;
-    if (!category) { toast.error("Choisissez une catégorie"); return; }
-    if (description.trim().length < 5) { toast.error("Décrivez le problème en quelques mots"); return; }
-    if (!coords) { toast.error("Position GPS requise"); return; }
+    if (!category) {
+      toast.error("Choisissez une catégorie");
+      return;
+    }
+    if (description.trim().length < 5) {
+      toast.error("Décrivez le problème en quelques mots");
+      return;
+    }
+    if (!coords) {
+      toast.error("Localisation requise", {
+        description: "Saisissez l'adresse du lieu ou indiquez-le sur la carte.",
+      });
+      return;
+    }
     if (!isInAbidjan(coords.lat, coords.lng)) {
-      toast.error("Hors zone Abidjan", { description: "Seuls les signalements dans la zone d'Abidjan sont acceptés." });
+      toast.error("Hors zone Abidjan", {
+        description: "Seuls les signalements dans la zone d'Abidjan sont acceptés.",
+      });
       return;
     }
     if (imageRejected) {
-      toast.error("Image non valide", { description: "Veuillez fournir une photo en lien avec l'insalubrité urbaine." });
+      toast.error("Image non valide", {
+        description: "Veuillez fournir une photo en lien avec l'insalubrité urbaine.",
+      });
       return;
     }
 
@@ -342,7 +552,8 @@ function SignalerPage() {
         const ext = (photo.name.split(".").pop() || "jpg").toLowerCase();
         const path = `${user.id}/${Date.now()}.${ext}`;
         const { error: upErr } = await supabase.storage.from("report-photos").upload(path, photo, {
-          cacheControl: "3600", contentType: photo.type || "image/jpeg",
+          cacheControl: "3600",
+          contentType: photo.type || "image/jpeg",
         });
         if (upErr) throw upErr;
         const { data: pub } = supabase.storage.from("report-photos").getPublicUrl(path);
@@ -367,13 +578,19 @@ function SignalerPage() {
     }
   };
 
+  const detectedCommuneLabel = coords ? detectCommuneFromCoords(coords.lat, coords.lng) : null;
+
   return (
     <div className="min-h-screen bg-background">
       <AppHeader />
       <main className="mx-auto max-w-xl px-4 py-6 pb-24">
-        <Link to="/" className="mb-4 inline-block text-sm text-muted-foreground">← Retour au fil</Link>
+        <Link to="/" className="mb-4 inline-block text-sm text-muted-foreground">
+          ← Retour au fil
+        </Link>
         <h1 className="mb-1 text-2xl font-bold">Nouveau signalement</h1>
-        <p className="mb-6 text-sm text-muted-foreground">Remplissez en moins d'une minute. Photo et position aident énormément.</p>
+        <p className="mb-6 text-sm text-muted-foreground">
+          Remplissez en moins d'une minute. Vous pouvez aussi importer une photo prise plus tôt hors connexion.
+        </p>
 
         <div className="space-y-5">
           <Card className="p-4">
@@ -382,16 +599,26 @@ function SignalerPage() {
               <div className="mb-3 flex items-center gap-2 rounded-md bg-primary/10 px-3 py-2 text-xs">
                 <Sparkles className="h-3.5 w-3.5 text-primary" />
                 <span className="text-muted-foreground">Suggestion IA :</span>
-                <Badge variant="secondary">{CATEGORIES.find((c) => c.value === aiSuggestion.category)?.label}</Badge>
-                <span className="ml-auto text-muted-foreground">{Math.round(aiSuggestion.confidence * 100)}% sûr</span>
+                <Badge variant="secondary">
+                  {CATEGORIES.find((c) => c.value === aiSuggestion.category)?.label}
+                </Badge>
+                <span className="ml-auto text-muted-foreground">
+                  {Math.round(aiSuggestion.confidence * 100)}% sûr
+                </span>
               </div>
             )}
             <div className="grid grid-cols-2 gap-2">
               {CATEGORIES.map((c) => (
-                <button key={c.value} type="button" onClick={() => setCategory(c.value)}
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setCategory(c.value)}
                   className={`group flex flex-col gap-2 overflow-hidden rounded-lg border-2 p-0 text-left text-sm transition ${
-                    category === c.value ? "border-primary bg-primary/10" : "border-border hover:border-primary/50"
-                  }`}>
+                    category === c.value
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-primary/50"
+                  }`}
+                >
                   <img src={c.image} alt="" loading="lazy" className="h-20 w-full object-cover" />
                   <span className="px-3 pb-2 text-xs font-medium leading-tight">{c.label}</span>
                 </button>
@@ -402,7 +629,9 @@ function SignalerPage() {
           {checkingDuplicate && (
             <div className="flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50/50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
               <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-              <span>L'IA compare votre photo avec les signalements proches pour vérifier s'il s'agit du même endroit…</span>
+              <span>
+                L'IA compare votre photo avec les signalements proches pour vérifier s'il s'agit du même endroit…
+              </span>
             </div>
           )}
 
@@ -417,7 +646,10 @@ function SignalerPage() {
                     <h3 className="font-bold text-amber-950 dark:text-amber-100 text-sm">
                       Doublon détecté par l'IA (même lieu & similitude visuelle) !
                     </h3>
-                    <Badge variant="outline" className="border-amber-400 text-amber-800 dark:text-amber-200 shrink-0">
+                    <Badge
+                      variant="outline"
+                      className="border-amber-400 text-amber-800 dark:text-amber-200 shrink-0"
+                    >
                       {formatDistance(nearbyDuplicate.distance)}
                     </Badge>
                   </div>
@@ -440,7 +672,9 @@ function SignalerPage() {
                     />
                   )}
                   <p className="text-[11px] text-amber-800/90 dark:text-amber-300">
-                    L'IA a reconnu les mêmes repères visuels et la même localisation. Cliquez sur <strong>« Confirmer ce problème (+1) »</strong> pour appuyer ce signalement auprès de la mairie plutôt que de créer un doublon.
+                    L'IA a reconnu les mêmes repères visuels et la même localisation. Cliquez sur{" "}
+                    <strong>« Confirmer ce problème (+1) »</strong> pour appuyer ce signalement auprès de la mairie
+                    plutôt que de créer un doublon.
                   </p>
                   <div className="flex flex-wrap items-center gap-2 pt-2">
                     <Button
@@ -475,41 +709,45 @@ function SignalerPage() {
             </Card>
           )}
 
-
-          <Card className="p-4">
-            <Label htmlFor="desc">Description</Label>
-            <Textarea id="desc" value={description} maxLength={1000}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Ex : tas d'ordures depuis 3 jours devant l'école..."
-              className="mt-1.5 min-h-24" />
-            <div className="mt-1 text-right text-xs text-muted-foreground">{description.length}/1000</div>
-          </Card>
-
-          <Card className="p-4">
-            <Label htmlFor="ville">Ville / quartier (optionnel)</Label>
-            <Input id="ville" value={ville} onChange={(e) => setVille(e.target.value)}
-              placeholder="Ex : Cocody, Abidjan" className="mt-1.5" maxLength={100} />
-          </Card>
-
           <Card className="p-4">
             <Label className="mb-2 block">Photo (recommandé)</Label>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/50">
                 <Camera className="h-5 w-5" />
                 <span>Prendre une photo</span>
-                <input type="file" accept="image/*" capture="environment" className="hidden"
-                  onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)}
+                />
               </label>
               <label className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-border bg-muted/30 px-4 py-5 text-sm text-muted-foreground hover:border-primary/50">
                 <ImageIcon className="h-5 w-5" />
                 <span>Importer depuis la galerie</span>
-                <input type="file" accept="image/*" className="hidden"
-                  onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)} />
+                <input
+                  type="file"
+                  accept="image/*,.jpg,.jpeg,.heic,.webp"
+                  className="hidden"
+                  onChange={(e) => handlePhoto(e.target.files?.[0] ?? null)}
+                />
               </label>
             </div>
             <p className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-              <ShieldCheck className="h-3 w-3" /> Les visages sont automatiquement floutés sur votre appareil avant l'envoi.
+              <ShieldCheck className="h-3 w-3 shrink-0" /> Les visages sont automatiquement floutés avant l'envoi. Si
+              la photo contient une position GPS, elle est récupérée automatiquement.
             </p>
+            {locationSource === "photo" && coords && (
+              <div className="mt-2 flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50/80 px-2.5 py-1.5 text-xs font-medium text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                <span>
+                  Position GPS extraite de la photo
+                  {detectedCommuneLabel ? ` (${detectedCommuneLabel})` : ""}
+                  {exifCapturedAt ? ` · prise le ${exifCapturedAt}` : ""}
+                </span>
+              </div>
+            )}
             {(blurring || analyzing) && (
               <div className="mt-2 flex items-center gap-2 text-xs font-medium text-primary">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Analyse IA & floutage automatique des visages en cours…
@@ -521,7 +759,8 @@ function SignalerPage() {
                   <span className="text-muted-foreground">Aucun visage détecté dans cette photo.</span>
                 ) : (
                   <span className="font-medium text-emerald-700">
-                    🛡️ {facesBlurred} visage{facesBlurred > 1 ? "s" : ""} flouté{facesBlurred > 1 ? "s" : ""} automatiquement pour préserver la vie privée.
+                    🛡️ {facesBlurred} visage{facesBlurred > 1 ? "s" : ""} flouté
+                    {facesBlurred > 1 ? "s" : ""} automatiquement pour préserver la vie privée.
                   </span>
                 )}
               </div>
@@ -529,7 +768,9 @@ function SignalerPage() {
             {imageRejected && (
               <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
                 <strong>Image refusée :</strong> {imageRejected}
-                <div className="mt-1 text-[11px]">SalubApp n'accepte que les photos liées à la salubrité urbaine, la voirie ou les chantiers.</div>
+                <div className="mt-1 text-[11px]">
+                  SalubApp n'accepte que les photos liées à la salubrité urbaine, la voirie ou les chantiers.
+                </div>
               </div>
             )}
             {photoPreview && (
@@ -541,7 +782,8 @@ function SignalerPage() {
                   className="max-h-60 w-full cursor-crosshair rounded-lg object-cover ring-1 ring-border hover:ring-primary"
                 />
                 <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
-                  👆 <strong>Astuce :</strong> Touchez directement la photo pour flouter manuellement un visage ou une zone.
+                  👆 <strong>Astuce :</strong> Touchez directement la photo pour flouter manuellement un visage ou une
+                  zone.
                 </p>
               </div>
             )}
@@ -554,7 +796,14 @@ function SignalerPage() {
                     ? "Photo analysée — la catégorie a été pré-remplie."
                     : "L'IA peut classer automatiquement votre photo."}
                 </p>
-                <Button type="button" variant="outline" size="sm" disabled={analyzing} onClick={() => photo && analyzePhoto(photo)} className="gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={analyzing}
+                  onClick={() => photo && analyzePhoto(photo)}
+                  className="gap-1"
+                >
                   {analyzing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                   {analyzing ? "Analyse…" : aiSuggestion ? "Re-analyser" : "Analyser avec l'IA"}
                 </Button>
@@ -563,32 +812,233 @@ function SignalerPage() {
           </Card>
 
           <Card className="p-4">
-            <Label className="mb-2 block">Position GPS</Label>
-            {geoState === "loading" && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Localisation en cours…
-              </div>
-            )}
-            {geoState === "ok" && coords && (
-              <div className="flex items-center gap-2 text-sm text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" />
-                Position acquise ({coords.lat.toFixed(4)}, {coords.lng.toFixed(4)})
-              </div>
-            )}
-            {geoState === "error" && (
-              <div className="space-y-2">
-                <p className="text-xs text-destructive">
-                  Position non disponible ou hors de la zone d'Abidjan. SalubApp ne couvre que la zone du Grand Abidjan.
-                </p>
-                <Button type="button" variant="outline" size="sm" onClick={askLocation} className="gap-1">
-                  <MapPin className="h-4 w-4" /> Réessayer la localisation
-                </Button>
-              </div>
-            )}
+            <Label htmlFor="desc">Description</Label>
+            <Textarea
+              id="desc"
+              value={description}
+              maxLength={1000}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Ex : tas d'ordures depuis 3 jours devant l'école..."
+              className="mt-1.5 min-h-24"
+            />
+            <div className="mt-1 text-right text-xs text-muted-foreground">{description.length}/1000</div>
           </Card>
 
-          <Button onClick={submit} disabled={submitting || geoState !== "ok"} size="lg" className="w-full">
-            {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Envoi…</>) : "Envoyer le signalement"}
+          {/* CARTE DE LOCALISATION : 1) EXIF Photo / GPS auto, 2) Champ d'adresse affiché d'emblée, et option Carte en bas */}
+          <Card className="space-y-4 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="text-sm font-semibold">Localisation du problème</Label>
+              {locationSource && coords && (
+                <Badge variant="secondary" className="text-[11px]">
+                  {locationSource === "photo" && "📸 Extraite de la photo"}
+                  {locationSource === "address" && "🏠 Adresse saisie"}
+                  {locationSource === "map" && "🗺️ Pointée sur la carte"}
+                  {locationSource === "gps" && "📡 Position actuelle"}
+                </Badge>
+              )}
+            </div>
+
+            {/* État de la localisation active */}
+            {geoState === "loading" && !coords && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Détection de la position en cours…
+              </div>
+            )}
+
+            {coords && (
+              <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5 text-xs text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">
+                    {selectedPlaceLabel
+                      ? selectedPlaceLabel
+                      : detectedCommuneLabel
+                      ? `Commune détectée : ${detectedCommuneLabel}`
+                      : "Position enregistrée dans le Grand Abidjan"}
+                  </div>
+                  <div className="text-[11px] opacity-80">
+                    GPS : {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {photoMissingExif && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50/70 p-2.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <span>
+                  Cette photo ne contenait pas de variable GPS intégrée. Si vous n'êtes plus sur le lieu du problème,
+                  entrez l'adresse ci-dessous ou indiquez-le via la carte.
+                </span>
+              </div>
+            )}
+
+            {/* MODE PAR DÉFAUT : Saisir directement l'adresse (sans imposer la carte d'emblée) */}
+            {locationInputMode === "address" && (
+              <div className="space-y-2">
+                <Label htmlFor="address-search" className="text-xs text-muted-foreground">
+                  Vous n'êtes plus sur place ou sans GPS ? Entrez l'adresse, le quartier ou un repère connu :
+                </Label>
+                <div className="relative">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="address-search"
+                        type="text"
+                        value={addressQuery}
+                        onFocus={() => setAddressFocused(true)}
+                        onBlur={() => setTimeout(() => setAddressFocused(false), 200)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void handleManualAddressSubmit();
+                          }
+                        }}
+                        onChange={(e) => setAddressQuery(e.target.value)}
+                        placeholder="Ex : Yopougon Siporex, Cocody Angré, Bingerville…"
+                        className="pl-9 pr-8 text-xs sm:text-sm"
+                      />
+                      {addressQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setAddressQuery("")}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          aria-label="Effacer l'adresse"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={searchingAddress}
+                      onClick={() => void handleManualAddressSubmit()}
+                      className="shrink-0 h-9 px-3 text-xs font-semibold"
+                    >
+                      {searchingAddress ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Valider"}
+                    </Button>
+                  </div>
+
+                  {/* Liste de suggestions d'adresses / quartiers d'Abidjan */}
+                  {addressFocused && addressResults.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-auto rounded-lg border bg-popover p-1 shadow-md">
+                      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {addressQuery.trim() ? "Lieux trouvés dans le Grand Abidjan" : "Quartiers & repères fréquents"}
+                      </div>
+                      {addressResults.map((place) => (
+                        <button
+                          key={place.id}
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            selectAddressPlace(place);
+                          }}
+                          className="flex w-full items-start gap-2 rounded-md px-2.5 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                        >
+                          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium">{place.label}</div>
+                            <div className="truncate text-[10px] text-muted-foreground">{place.sublabel}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* MODE CARTE : Affiché uniquement si l'utilisateur choisit l'option carte en bas */}
+            {locationInputMode === "map" && (
+              <Suspense
+                fallback={
+                  <div className="flex h-64 items-center justify-center rounded-xl border bg-muted text-xs text-muted-foreground">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Chargement de la carte…
+                  </div>
+                }
+              >
+                <LocationPickerMap
+                  coords={coords}
+                  onSelectLocation={(lat, lng, commune) => {
+                    locationLockRef.current = "map";
+                    setCoords({ lat, lng });
+                    setGeoState("ok");
+                    setLocationSource("map");
+                    setSelectedPlaceLabel(null);
+                    if (commune) {
+                      setVille((prev) => (prev.trim().length === 0 ? commune : prev));
+                    }
+                  }}
+                />
+              </Suspense>
+            )}
+
+            {/* Champ complémentaire optionnel pour préciser un repère exact aux équipes de la mairie */}
+            <div>
+              <Label htmlFor="ville" className="text-xs text-muted-foreground">
+                Précision de repère pour la mairie (optionnel)
+              </Label>
+              <Input
+                id="ville"
+                value={ville}
+                onChange={(e) => setVille(e.target.value)}
+                placeholder="Ex : Derrière la pharmacie Siporex, près de l'école…"
+                className="mt-1 text-xs sm:text-sm"
+                maxLength={100}
+              />
+            </div>
+
+            {/* BARRE D'OPTIONS EN BAS : Saisir l'adresse OU Indiquer à travers une carte (ou Position actuelle) */}
+            <div className="border-t pt-3">
+              <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+                Vous ne connaissez pas l'adresse exacte ? Choisissez comment indiquer le lieu :
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={locationInputMode === "address" ? "default" : "outline"}
+                  onClick={() => setLocationInputMode("address")}
+                  className="gap-1.5 text-xs"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                  Saisir l'adresse
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={locationInputMode === "map" ? "default" : "outline"}
+                  onClick={() => setLocationInputMode("map")}
+                  className="gap-1.5 text-xs"
+                >
+                  <MapIcon className="h-3.5 w-3.5" />
+                  Indiquer à travers une carte
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => askLocation(false)}
+                  className="gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <Navigation className="h-3.5 w-3.5" />
+                  Ma position actuelle
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          <Button onClick={submit} disabled={submitting || !coords} size="lg" className="w-full">
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Envoi…
+              </>
+            ) : (
+              "Envoyer le signalement"
+            )}
           </Button>
         </div>
       </main>

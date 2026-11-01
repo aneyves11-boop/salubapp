@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { AppHeader } from "@/components/AppHeader";
+import { AppFooter } from "@/components/AppFooter";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -1006,6 +1007,7 @@ function SignalerPage() {
           </Button>
         </div>
       </main>
+      <AppFooter />
     </div>
   );
 }

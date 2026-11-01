@@ -14,6 +14,7 @@ import { Route as Administrator_appRouteImport } from './routes/administrator_ap
 import { Route as AvisRouteImport } from './routes/avis'
 import { Route as CarteRouteImport } from './routes/carte'
 import { Route as ConfidentialiteRouteImport } from './routes/confidentialite'
+import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignalerRouteImport } from './routes/signaler'
@@ -43,6 +44,11 @@ const ConfidentialiteRoute = ConfidentialiteRouteImport.update({
   path: '/confidentialite',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ContactRoute = ContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/avis': typeof AvisRoute
   '/carte': typeof CarteRoute
   '/confidentialite': typeof ConfidentialiteRoute
+  '/contact': typeof ContactRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/avis': typeof AvisRoute
   '/carte': typeof CarteRoute
   '/confidentialite': typeof ConfidentialiteRoute
+  '/contact': typeof ContactRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/avis': typeof AvisRoute
   '/carte': typeof CarteRoute
   '/confidentialite': typeof ConfidentialiteRoute
+  '/contact': typeof ContactRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/signaler': typeof SignalerRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/avis'
     | '/carte'
     | '/confidentialite'
+    | '/contact'
     | '/dashboard'
     | '/login'
     | '/signaler'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/avis'
     | '/carte'
     | '/confidentialite'
+    | '/contact'
     | '/dashboard'
     | '/login'
     | '/signaler'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/avis'
     | '/carte'
     | '/confidentialite'
+    | '/contact'
     | '/dashboard'
     | '/login'
     | '/signaler'
@@ -129,6 +141,7 @@ export interface RootRouteChildren {
   AvisRoute: typeof AvisRoute
   CarteRoute: typeof CarteRoute
   ConfidentialiteRoute: typeof ConfidentialiteRoute
+  ContactRoute: typeof ContactRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
   SignalerRoute: typeof SignalerRoute
@@ -171,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConfidentialiteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/contact': {
+      id: '/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof ContactRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/dashboard': {
       id: '/dashboard'
       path: '/dashboard'
@@ -201,6 +221,7 @@ const rootRouteChildren: RootRouteChildren = {
   AvisRoute: AvisRoute,
   CarteRoute: CarteRoute,
   ConfidentialiteRoute: ConfidentialiteRoute,
+  ContactRoute: ContactRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
   SignalerRoute: SignalerRoute,

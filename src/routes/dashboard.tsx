@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -45,6 +45,8 @@ import {
   ListChecks,
   Wrench,
   Lock,
+  Mail,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -154,9 +156,11 @@ function StructureHeader({
     <header className="sticky top-0 z-40 border-b bg-slate-900 text-white shadow-sm">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow">
-            <Building2 className="h-5 w-5" />
-          </div>
+          <img
+            src="/logo-salubapp.png"
+            alt="Logo SalubApp"
+            className="h-10 w-10 rounded-xl object-cover shadow"
+          />
           <div>
             <div className="flex items-center gap-2">
               <span className="text-base font-bold tracking-tight">SalubApp · Portail Structures</span>
@@ -165,33 +169,91 @@ function StructureHeader({
               </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Plateforme réservée aux Mairies, ONG et Opérateurs partenaires
+              Plateforme réservée aux Mairies, ONG et Opérateurs partenaires · AXY GROUP
             </div>
           </div>
         </div>
 
-        {structureName && onSignOut && (
-          <div className="flex items-center gap-3">
-            <div className="hidden text-right sm:block">
-              <div className="text-xs font-semibold text-white">{structureName}</div>
-              <div className="text-[10px] text-emerald-400">
-                {structureType}
-                {structureCommune ? ` · 📍 ${structureCommune}` : ""}
+        <div className="flex items-center gap-2.5">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="hidden gap-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white sm:inline-flex"
+          >
+            <Link to="/contact">
+              <Mail className="h-3.5 w-3.5" />
+              Nous contacter
+            </Link>
+          </Button>
+          {structureName && onSignOut && (
+            <>
+              <div className="hidden text-right sm:block">
+                <div className="text-xs font-semibold text-white">{structureName}</div>
+                <div className="text-[10px] text-emerald-400">
+                  {structureType}
+                  {structureCommune ? ` · 📍 ${structureCommune}` : ""}
+                </div>
               </div>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onSignOut}
-              className="gap-1.5 border-slate-700 bg-slate-800 text-xs text-white hover:bg-slate-700 hover:text-white"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Déconnexion
-            </Button>
-          </div>
-        )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onSignOut}
+                className="gap-1.5 border-slate-700 bg-slate-800 text-xs text-white hover:bg-slate-700 hover:text-white"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Déconnexion
+              </Button>
+            </>
+          )}
+        </div>
       </div>
     </header>
+  );
+}
+
+function StructureFooter() {
+  return (
+    <footer className="mt-10 border-t border-slate-200 bg-white/80 dark:border-slate-800 dark:bg-card/60">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-muted-foreground sm:flex-row">
+        <div className="flex items-center gap-2.5 text-center sm:text-left">
+          <img
+            src="/logo-salubapp.png"
+            alt="Logo SalubApp"
+            className="h-7 w-7 shrink-0 rounded-lg object-cover"
+          />
+          <div>
+            <div className="font-medium text-foreground">
+              © {new Date().getFullYear()} SalubApp · Portail des Structures
+            </div>
+            <div className="inline-flex items-center gap-1 text-[11px]">
+              <Sparkles className="h-3 w-3 text-emerald-600" />
+              Conçu et développé par{" "}
+              <strong className="font-bold tracking-wide text-emerald-700 dark:text-emerald-400">
+                AXY GROUP
+              </strong>
+            </div>
+          </div>
+        </div>
+        <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+          <Link
+            to="/contact"
+            className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:underline dark:text-emerald-400"
+          >
+            <Mail className="h-3.5 w-3.5" /> Nous contacter
+          </Link>
+          <Link
+            to="/confidentialite"
+            className="inline-flex items-center gap-1 hover:text-foreground"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" /> Confidentialité
+          </Link>
+          <Link to="/" className="hover:text-foreground">
+            Interface Citoyens ↗
+          </Link>
+        </nav>
+      </div>
+    </footer>
   );
 }
 
@@ -721,13 +783,15 @@ function StructurePlatformPage() {
   // ÉCRAN 1 : PORTAIL VERROUILLÉ PAR CODE D'ACCRÉDITATION PARTENAIRE
   if (!isAutorite) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-background">
+      <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-background">
         <StructureHeader />
-        <main className="mx-auto max-w-md px-4 py-10">
+        <main className="mx-auto w-full max-w-md flex-1 px-4 py-10">
           <div className="mb-6 flex flex-col items-center text-center">
-            <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-700 text-white shadow-lg">
-              <Lock className="h-7 w-7" />
-            </div>
+            <img
+              src="/logo-salubapp.png"
+              alt="Logo SalubApp"
+              className="mb-3 h-16 w-16 rounded-2xl object-cover shadow-lg"
+            />
             <h1 className="text-2xl font-bold">Portail des Structures Accréditées</h1>
             <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
               Accès sécurisé réservé aux Mairies, Collectivités, ONG et Opérateurs partenaires disposant d'un code d'accréditation SalubApp.
@@ -929,14 +993,22 @@ function StructurePlatformPage() {
               </Button>
             </form>
           </Card>
+
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-center text-xs text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
+            Vous représentez une <strong>Mairie</strong>, une <strong>ONG</strong> ou un <strong>Opérateur</strong> et n'avez pas encore de code d'accès ?{" "}
+            <Link to="/contact" className="inline-flex items-center gap-1 font-bold text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300">
+              <Mail className="h-3 w-3" /> Contactez AXY GROUP
+            </Link>
+          </div>
         </main>
+        <StructureFooter />
       </div>
     );
   }
 
   // ÉCRAN 2 : TABLEAU DE BORD OPÉRATIONNEL DES STRUCTURES ACCRÉDITÉES
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-background">
+    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-background">
       <StructureHeader
         structureName={structureProfile?.name || "Structure Partenaire"}
         structureType={structureProfile?.type || "Mairie / ONG"}
@@ -1512,6 +1584,7 @@ function StructurePlatformPage() {
           </div>
         )}
       </main>
+      <StructureFooter />
     </div>
   );
 }

@@ -2,16 +2,19 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { AppFooter } from "@/components/AppFooter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { MapPin, ArrowLeft, UserCircle2, ShieldCheck, Lock } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
-  head: () => ({ meta: [
-    { title: "Mode anonyme — SalubApp" },
-    { name: "description", content: "Signalez en toute confidentialité, sans inscription." },
-  ]}),
+  head: () => ({
+    meta: [
+      { title: "Mode anonyme — SalubApp" },
+      { name: "description", content: "Signalez en toute confidentialité, sans inscription." },
+    ],
+  }),
   component: LoginPage,
 });
 
@@ -20,27 +23,37 @@ function LoginPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { if (user) navigate({ to: "/" }); }, [user, navigate]);
+  useEffect(() => {
+    if (user) navigate({ to: "/" });
+  }, [user, navigate]);
 
   const signInAnonymous = async () => {
     setLoading(true);
     const { error } = await supabase.auth.signInAnonymously();
     setLoading(false);
-    if (error) { toast.error("Mode anonyme indisponible", { description: error.message }); return; }
+    if (error) {
+      toast.error("Mode anonyme indisponible", { description: error.message });
+      return;
+    }
     toast.success("Vous êtes en mode anonyme");
     navigate({ to: "/" });
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-secondary/40 to-background px-4 py-8">
-      <div className="mx-auto max-w-md">
-        <Link to="/" className="mb-6 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-secondary/40 to-background">
+      <div className="mx-auto w-full max-w-md flex-1 px-4 py-8">
+        <Link
+          to="/"
+          className="mb-6 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
           <ArrowLeft className="h-4 w-4" /> Retour
         </Link>
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
-            <MapPin className="h-7 w-7" />
-          </div>
+          <img
+            src="/logo-salubapp.png"
+            alt="Logo SalubApp"
+            className="mb-3 h-16 w-16 rounded-2xl object-cover shadow-lg"
+          />
           <h1 className="text-2xl font-bold">Signalez en toute confidentialité</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Aucune inscription, aucun email, aucun numéro de téléphone n'est demandé.
@@ -71,11 +84,13 @@ function LoginPage() {
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
           En continuant, vous acceptez notre{" "}
-          <Link to="/confidentialite" className="underline hover:text-foreground">politique de confidentialité</Link>.
+          <Link to="/confidentialite" className="underline hover:text-foreground">
+            politique de confidentialité
+          </Link>
+          .
         </p>
       </div>
+      <AppFooter />
     </div>
   );
 }
-
-

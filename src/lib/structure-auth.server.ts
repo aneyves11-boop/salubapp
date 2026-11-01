@@ -1,4 +1,6 @@
-import { createHash, createHmac, pbkdf2Sync, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { ABIDJAN_COMMUNES, detectCommuneFromText, type AbidjanCommune } from "./abidjan";
 
 export interface AccreditedStructureProfile {
@@ -23,9 +25,43 @@ interface HashedPartnerRule {
 
 const PBKDF2_ITERATIONS = 100_000;
 const PBKDF2_KEYLEN = 32;
+const CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+const COMMUNE_TO_PREFIX: Record<AbidjanCommune, string> = {
+  Abobo: "ABO",
+  "Adjamé": "ADJ",
+  Anyama: "ANY",
+  "Attécoubé": "ATT",
+  Bingerville: "BNG",
+  Cocody: "COC",
+  Koumassi: "KOU",
+  Marcory: "MAR",
+  Plateau: "PLA",
+  "Port-Bouët": "PBO",
+  Songon: "SON",
+  Treichville: "TRE",
+  Yopougon: "YOP",
+};
+
+const PREFIX_TO_COMMUNE: Record<string, AbidjanCommune | null> = {
+  ABO: "Abobo",
+  ADJ: "Adjamé",
+  ANY: "Anyama",
+  ATT: "Attécoubé",
+  BNG: "Bingerville",
+  COC: "Cocody",
+  KOU: "Koumassi",
+  MAR: "Marcory",
+  PLA: "Plateau",
+  PBO: "Port-Bouët",
+  SON: "Songon",
+  TRE: "Treichville",
+  YOP: "Yopougon",
+  AXY: null,
+};
 
 /**
- * Empreintes PBKDF2-HMAC-SHA256 (100 000 itérations) des codes d'accréditation officiels.
+ * Empreintes PBKDF2-HMAC-SHA256 (100 000 itérations) des codes d'accréditation initiaux.
  * Aucun code en clair n'est présent dans le dépôt ni exposé côté navigateur.
  */
 const ACCREDITATION_RULES: readonly HashedPartnerRule[] = [
@@ -69,6 +105,9 @@ function normalizeAccessCode(raw: string): string {
   if (/^[A-Z0-9]{11}$/.test(compact)) {
     return `${compact.slice(0, 3)}-${compact.slice(3, 7)}-${compact.slice(7, 11)}`;
   }
+  if (/^[A-Z0-9]{13}$/.test(compact)) {
+    return `${compact.slice(0, 3)}-${compact.slice(3, 7)}-${compact.slice(7, 13)}`;
+  }
   return compact;
 }
 
@@ -82,6 +121,17 @@ function getHmacSigningKey(): Buffer {
   return createHash("sha256")
     .update(`salubapp:partner-hmac:v1:${secretSeed}`)
     .digest();
+}
+
+function computeInviteSig6(prefix: string, nonce4: string): string {
+  const digest = createHmac("sha256", getHmacSigningKey())
+    .update(`salubapp:axy-invite:v1:${prefix}:${nonce4}`)
+    .digest();
+  let out = "";
+  for (let i = 0; i < 6; i++) {
+    out += CODE_ALPHABET[digest[i] & 31];
+  }
+  return out;
 }
 
 function sanitizeCommune(value?: string | null): AbidjanCommune | null {
@@ -101,7 +151,27 @@ function matchPartnerCode(rawCode: string): {
     return null;
   }
 
-  // 1. Codes additionnels éventuels configurés dans les variables d'environnement Vercel
+  // 1. Codes dynamiques signés par l'administrateur AXY GROUP (format PREFIX-XXXX-XXXXXX)
+  const signedMatch = /^([A-Z]{3})-([A-Z0-9]{4})-([A-Z0-9]{6})$/.exec(normalized);
+  if (signedMatch) {
+    const [, prefix, nonce4, providedSig6] = signedMatch;
+    if (Object.prototype.hasOwnProperty.call(PREFIX_TO_COMMUNE, prefix)) {
+      const expectedSig6 = computeInviteSig6(prefix, nonce4);
+      const a = Buffer.from(providedSig6, "utf8");
+      const b = Buffer.from(expectedSig6, "utf8");
+      if (a.length === b.length && timingSafeEqual(a, b)) {
+        const lockedCommune = PREFIX_TO_COMMUNE[prefix] ?? null;
+        return {
+          matched: true,
+          lockedCommune,
+          defaultName: lockedCommune ? `Mairie de ${lockedCommune}` : "Structure Partenaire",
+          defaultType: "Mairie / Collectivité",
+        };
+      }
+    }
+  }
+
+  // 2. Codes additionnels éventuels configurés dans les variables d'environnement Vercel
   const customEnvRaw =
     process.env.STRUCTURE_ACCESS_CODE || process.env.STRUCTURE_ACCESS_CODES || "";
   if (customEnvRaw.trim().length > 0) {
@@ -124,7 +194,7 @@ function matchPartnerCode(rawCode: string): {
     }
   }
 
-  // 2. Vérification PBKDF2-HMAC-SHA256 des codes officiels (Mairies pilotes & partenaires)
+  // 3. Vérification PBKDF2-HMAC-SHA256 des codes pilotes initiaux
   const codeBytes = Buffer.from(normalized, "utf8");
   for (const rule of ACCREDITATION_RULES) {
     const derived = pbkdf2Sync(
@@ -146,6 +216,78 @@ function matchPartnerCode(rawCode: string): {
   }
 
   return null;
+}
+
+async function verifyAdminAccessToken(accessToken?: string): Promise<boolean> {
+  if (!accessToken) return false;
+  try {
+    const url =
+      process.env.VITE_SUPABASE_URL ||
+      process.env.SUPABASE_URL ||
+      "https://hrtakmtfxsnimrevrwdw.supabase.co";
+    const key =
+      process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.SUPABASE_PUBLISHABLE_KEY ||
+      "sb_publishable_E915muuQJdNJ112ZQ-RvuQ_H-hihgC8";
+
+    const sb = createClient<Database>(url, key, {
+      global: {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+    const { data: userData, error: userErr } = await sb.auth.getUser(accessToken);
+    if (userErr || !userData.user) return false;
+
+    const { data: roles } = await sb
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userData.user.id);
+
+    return (roles ?? []).some((r) => r.role === "admin");
+  } catch {
+    return false;
+  }
+}
+
+export async function generateOfficialAccessCodeForAdmin(params: {
+  commune?: string | null;
+  accessToken: string;
+}): Promise<{
+  ok: boolean;
+  code?: string;
+  commune?: AbidjanCommune | null;
+  error?: string;
+}> {
+  const isAdmin = await verifyAdminAccessToken(params.accessToken);
+  if (!isAdmin) {
+    return {
+      ok: false,
+      error: "Accès refusé : seul un administrateur AXY GROUP peut générer un code partenaire.",
+    };
+  }
+
+  const targetCommune = sanitizeCommune(params.commune);
+  const prefix = targetCommune ? COMMUNE_TO_PREFIX[targetCommune] : "AXY";
+
+  const rand = randomBytes(4);
+  let nonce4 = "";
+  for (let i = 0; i < 4; i++) {
+    nonce4 += CODE_ALPHABET[rand[i] & 31];
+  }
+
+  const sig6 = computeInviteSig6(prefix, nonce4);
+  const code = `${prefix}-${nonce4}-${sig6}`;
+
+  return {
+    ok: true,
+    code,
+    commune: targetCommune,
+  };
 }
 
 export function signPartnerToken(profile: AccreditedStructureProfile): string {
@@ -194,7 +336,10 @@ export function verifyPartnerTokenServer(token?: string | null): PartnerTokenPay
     return {
       v: 1,
       name: parsed.name.trim(),
-      type: typeof parsed.type === "string" && parsed.type.trim() ? parsed.type.trim() : "Mairie / Collectivité",
+      type:
+        typeof parsed.type === "string" && parsed.type.trim()
+          ? parsed.type.trim()
+          : "Mairie / Collectivité",
       commune: sanitizeCommune(parsed.commune),
       email: typeof parsed.email === "string" ? parsed.email : undefined,
       iat: typeof parsed.iat === "number" ? parsed.iat : 0,
@@ -239,7 +384,7 @@ export async function verifyAndAccreditStructure(params: {
     return {
       ok: false,
       error:
-        "Code d'accès partenaire invalide. Cet espace est strictement réservé aux Mairies et structures accréditées par SalubApp.",
+        "Code d'accès partenaire invalide. Cet espace est strictement réservé aux Mairies et structures accréditées par AXY GROUP.",
     };
   }
 

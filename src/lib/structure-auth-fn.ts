@@ -57,3 +57,24 @@ export const verifyPartnerTokenServerFn = createServerFn({ method: "POST" })
       };
     }
   );
+
+export const generateStructureAccessCodeServerFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    (data: {
+      commune?: string | null;
+      accessToken: string;
+    }) => data
+  )
+  .handler(
+    async ({
+      data,
+    }): Promise<{
+      ok: boolean;
+      code?: string;
+      commune?: AbidjanCommune | null;
+      error?: string;
+    }> => {
+      const { generateOfficialAccessCodeForAdmin } = await import("./structure-auth.server");
+      return generateOfficialAccessCodeForAdmin(data);
+    }
+  );

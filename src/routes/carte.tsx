@@ -3,10 +3,11 @@ import { useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { AppHeader } from "@/components/AppHeader";
+import { AppFooter } from "@/components/AppFooter";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CATEGORIES, categoryLabel, type Category } from "@/lib/categories";
+import { CATEGORIES, type Category } from "@/lib/categories";
 import { detectCommuneFromCoords } from "@/lib/abidjan";
 import {
   fetchSyncedStatuses,
@@ -22,10 +23,15 @@ const HeatMap = lazy(() => import("@/components/HeatMap").then((m) => ({ default
 type Report = Database["public"]["Tables"]["reports"]["Row"];
 
 export const Route = createFileRoute("/carte")({
-  head: () => ({ meta: [
-    { title: "Carte thermique des nuisances — SalubApp" },
-    { name: "description", content: "Visualisez les zones les plus touchées par l'insalubrité dans votre ville." },
-  ]}),
+  head: () => ({
+    meta: [
+      { title: "Carte thermique des nuisances — SalubApp" },
+      {
+        name: "description",
+        content: "Visualisez les zones les plus touchées par l'insalubrité dans votre ville.",
+      },
+    ],
+  }),
   component: PublicDashboard,
 });
 
@@ -70,8 +76,12 @@ function PublicDashboard() {
 
   const byCategory = useMemo(() => {
     const m = new Map<Category, number>();
-    (reports ?? []).forEach((r) => m.set(r.category as Category, (m.get(r.category as Category) ?? 0) + 1));
-    return CATEGORIES.map((c) => ({ ...c, count: m.get(c.value) ?? 0 })).sort((a, b) => b.count - a.count);
+    (reports ?? []).forEach((r) =>
+      m.set(r.category as Category, (m.get(r.category as Category) ?? 0) + 1)
+    );
+    return CATEGORIES.map((c) => ({ ...c, count: m.get(c.value) ?? 0 })).sort(
+      (a, b) => b.count - a.count
+    );
   }, [reports]);
 
   const topZones = useMemo(() => {
@@ -95,9 +105,9 @@ function PublicDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <AppHeader />
-      <main className="mx-auto max-w-6xl px-4 py-6 pb-24">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-16">
         {/* En-tête */}
         <section className="mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-orange-600 via-red-500 to-rose-600 p-6 text-white shadow-lg">
           <div className="flex items-start gap-4">
@@ -159,7 +169,13 @@ function PublicDashboard() {
                     Aucune donnée à afficher.
                   </div>
                 ) : (
-                  <Suspense fallback={<div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full items-center justify-center">
+                        <Loader2 className="h-6 w-6 animate-spin" />
+                      </div>
+                    }
+                  >
                     <HeatMap reports={filtered} />
                   </Suspense>
                 )}
@@ -178,7 +194,11 @@ function PublicDashboard() {
                     <button
                       key={c.value}
                       onClick={() => toggle(c.value)}
-                      className={`rounded-full border px-3 py-1.5 text-xs transition ${on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
+                      className={`rounded-full border px-3 py-1.5 text-xs transition ${
+                        on
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-background text-muted-foreground hover:bg-muted"
+                      }`}
                     >
                       {c.label}
                     </button>
@@ -224,7 +244,10 @@ function PublicDashboard() {
                   {topZones.map(([ville, n], i) => (
                     <li key={ville} className="flex items-center justify-between gap-2 text-sm">
                       <span className="flex items-center gap-2">
-                        <Badge variant={i === 0 ? "destructive" : "secondary"} className="h-6 w-6 justify-center rounded-full p-0 text-xs">
+                        <Badge
+                          variant={i === 0 ? "destructive" : "secondary"}
+                          className="h-6 w-6 justify-center rounded-full p-0 text-xs"
+                        >
                           {i + 1}
                         </Badge>
                         <span className="truncate">{ville}</span>
@@ -242,6 +265,7 @@ function PublicDashboard() {
           </div>
         </div>
       </main>
+      <AppFooter />
     </div>
   );
 }

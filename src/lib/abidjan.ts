@@ -134,4 +134,39 @@ export function detectCommuneFromCoords(
     }
   }
   return closest;
-}
+}
+
+function normalizeCommuneKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Retourne les coordonnées centrales [lat, lng] d'une commune d'Abidjan.
+ */
+export function getCommuneCenter(communeName?: string | null): [number, number] | null {
+  if (!communeName) return null;
+  const target = normalizeCommuneKey(communeName);
+  if (!target) return null;
+  const found = COMMUNE_ZONES.find((z) => normalizeCommuneKey(z.name) === target);
+  return found ? found.center : null;
+}
+
+/**
+ * Détecte automatiquement une commune d'Abidjan mentionnée dans un texte libre
+ * (ex: "Mairie de Yopougon" → "Yopougon").
+ */
+export function detectCommuneFromText(text?: string | null): AbidjanCommune | null {
+  if (!text) return null;
+  const norm = normalizeCommuneKey(text);
+  if (!norm) return null;
+  for (const commune of ABIDJAN_COMMUNES) {
+    if (norm.includes(normalizeCommuneKey(commune))) {
+      return commune;
+    }
+  }
+  return null;
+}

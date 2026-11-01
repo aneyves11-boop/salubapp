@@ -1,10 +1,32 @@
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { useEffect } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import { categoryImage, categoryLabel, statusInfo, type Category, type Status } from "@/lib/categories";
 import type { Database } from "@/integrations/supabase/types";
-import { ABIDJAN_CENTER, ABIDJAN_DEFAULT_ZOOM, ABIDJAN_LEAFLET_BOUNDS, detectCommuneFromCoords } from "@/lib/abidjan";
+import {
+  ABIDJAN_CENTER,
+  ABIDJAN_DEFAULT_ZOOM,
+  ABIDJAN_LEAFLET_BOUNDS,
+  detectCommuneFromCoords,
+  getCommuneCenter,
+} from "@/lib/abidjan";
 
 type Report = Database["public"]["Tables"]["reports"]["Row"];
+
+function MapCommuneFocus({ focusCommune }: { focusCommune?: string | null }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const center = getCommuneCenter(focusCommune);
+    if (center) {
+      map.setView(center, 13, { animate: true });
+    } else if (focusCommune === "") {
+      map.setView(ABIDJAN_CENTER, ABIDJAN_DEFAULT_ZOOM, { animate: true });
+    }
+  }, [focusCommune, map]);
+
+  return null;
+}
 
 // Marker construit à partir de l'image du signalement (photo réelle si présente,
 // sinon illustration par défaut de la catégorie). Vignette ronde + liseré selon le statut.
@@ -43,20 +65,26 @@ function photoMarker(src: string, status: Status, isReal: boolean) {
 export function ReportsMap({
   reports,
   onSelectStatus,
+  focusCommune,
 }: {
   reports: Report[];
   onSelectStatus?: (reportId: string, newStatus: Status) => void;
+  focusCommune?: string | null;
 }) {
+  const initialCenter = getCommuneCenter(focusCommune) ?? ABIDJAN_CENTER;
+  const initialZoom = focusCommune && getCommuneCenter(focusCommune) ? 13 : ABIDJAN_DEFAULT_ZOOM;
+
   return (
     <MapContainer
-      center={ABIDJAN_CENTER}
-      zoom={ABIDJAN_DEFAULT_ZOOM}
+      center={initialCenter}
+      zoom={initialZoom}
       minZoom={10}
       maxBounds={ABIDJAN_LEAFLET_BOUNDS}
       maxBoundsViscosity={1}
       style={{ height: "100%", width: "100%" }}
       scrollWheelZoom
     >
+      <MapCommuneFocus focusCommune={focusCommune} />
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

@@ -1,16 +1,58 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { detectCommuneFromText, type AbidjanCommune } from "@/lib/abidjan";
+import { verifyPartnerTokenServerFn } from "@/lib/structure-auth-fn";
 
 export type AppRole = "citoyen" | "autorite" | "admin";
 
 export type StructureProfile = {
   name: string;
   type: string;
+  commune?: AbidjanCommune | null;
   email?: string;
+  partnerToken?: string;
 };
 
-const STRUCTURE_STORAGE_KEY = "salubapp_structure_profile";
+const LEGACY_STRUCTURE_STORAGE_KEY = "salubapp_structure_profile";
+const PARTNER_TOKEN_STORAGE_KEY = "salubapp_partner_token_v2";
+
+interface StoredPartnerToken {
+  userId: string;
+  partnerToken: string;
+}
+
+function readStoredTokenForUser(userId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    // Nettoyer l'ancienne clé non signée du prototype
+    localStorage.removeItem(LEGACY_STRUCTURE_STORAGE_KEY);
+    const raw = localStorage.getItem(PARTNER_TOKEN_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredPartnerToken>;
+    if (parsed.userId === userId && typeof parsed.partnerToken === "string" && parsed.partnerToken.length > 10) {
+      return parsed.partnerToken;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function writeStoredTokenForUser(userId: string | null, partnerToken: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(LEGACY_STRUCTURE_STORAGE_KEY);
+    if (userId && partnerToken) {
+      const payload: StoredPartnerToken = { userId, partnerToken };
+      localStorage.setItem(PARTNER_TOKEN_STORAGE_KEY, JSON.stringify(payload));
+    } else {
+      localStorage.removeItem(PARTNER_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
 
 interface AuthCtx {
   session: Session | null;
@@ -19,7 +61,7 @@ interface AuthCtx {
   loading: boolean;
   isAutorite: boolean;
   structureProfile: StructureProfile | null;
-  setStructureProfile: (profile: StructureProfile | null) => void;
+  setStructureProfile: (profile: StructureProfile | null, userIdOverride?: string) => void;
   signOut: () => Promise<void>;
   refreshRoles: () => Promise<void>;
 }
@@ -30,87 +72,145 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [structureProfile, setStructureProfileState] = useState<StructureProfile | null>(null);
+  const [isPartnerVerified, setIsPartnerVerified] = useState(false);
   const [loading, setLoading] = useState(true);
+  const hydrateSeqRef = useRef(0);
 
-  const syncStructureProfile = (user: User | null | undefined) => {
-    if (!user) {
+  const hydrateUserAccess = async (currentSession: Session | null) => {
+    const seq = ++hydrateSeqRef.current;
+    const currentUser = currentSession?.user ?? null;
+
+    if (!currentUser) {
+      setRoles([]);
+      setIsPartnerVerified(false);
       setStructureProfileState(null);
       return;
     }
-    const meta = user.user_metadata;
-    if (meta?.is_structure && meta?.structure_name) {
-      const prof: StructureProfile = {
-        name: String(meta.structure_name),
-        type: String(meta.structure_type || "Structure"),
-        email: meta.structure_email ? String(meta.structure_email) : user.email,
-      };
-      setStructureProfileState(prof);
-      if (typeof window !== "undefined") {
-        localStorage.setItem(STRUCTURE_STORAGE_KEY, JSON.stringify(prof));
-      }
+
+    const meta = currentUser.user_metadata;
+    const candidateToken =
+      (typeof meta?.partner_token === "string" && meta.partner_token.length > 10
+        ? meta.partner_token
+        : null) || readStoredTokenForUser(currentUser.id);
+
+    const [rolesRes, tokenRes] = await Promise.all([
+      supabase.from("user_roles").select("role").eq("user_id", currentUser.id),
+      candidateToken
+        ? verifyPartnerTokenServerFn({ data: { token: candidateToken } }).catch(() => ({
+            valid: false as const,
+            profile: undefined,
+          }))
+        : Promise.resolve({ valid: false as const, profile: undefined }),
+    ]);
+
+    if (seq !== hydrateSeqRef.current) return;
+
+    const loadedRoles = (rolesRes.data ?? []).map((r) => r.role as AppRole);
+    setRoles(loadedRoles);
+
+    if (tokenRes.valid && tokenRes.profile && candidateToken) {
+      writeStoredTokenForUser(currentUser.id, candidateToken);
+      setIsPartnerVerified(true);
+      setStructureProfileState({
+        name: tokenRes.profile.name,
+        type: tokenRes.profile.type,
+        commune: tokenRes.profile.commune ?? detectCommuneFromText(tokenRes.profile.name),
+        email: tokenRes.profile.email || currentUser.email,
+        partnerToken: candidateToken,
+      });
       return;
     }
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(STRUCTURE_STORAGE_KEY);
-        if (raw) {
-          setStructureProfileState(JSON.parse(raw) as StructureProfile);
-          return;
-        }
-      } catch {
-        // ignore
-      }
+
+    // Si l'utilisateur possède un rôle officiel SQL ('autorite' ou 'admin'), autoriser l'accès
+    if (loadedRoles.includes("autorite") || loadedRoles.includes("admin")) {
+      const fallbackName =
+        typeof meta?.structure_name === "string" && meta.structure_name.trim()
+          ? meta.structure_name.trim()
+          : loadedRoles.includes("admin")
+          ? "Administration SalubApp"
+          : "Autorité Locale";
+      const fallbackType =
+        typeof meta?.structure_type === "string" && meta.structure_type.trim()
+          ? meta.structure_type.trim()
+          : "Mairie / Collectivité";
+      const fallbackCommune =
+        detectCommuneFromText(
+          typeof meta?.structure_commune === "string" ? meta.structure_commune : fallbackName
+        ) ?? null;
+
+      setIsPartnerVerified(false);
+      setStructureProfileState({
+        name: fallbackName,
+        type: fallbackType,
+        commune: fallbackCommune,
+        email: currentUser.email,
+      });
+      return;
     }
+
+    // Sinon : citoyen standard ou jeton invalide -> aucun accès au portail structures
+    writeStoredTokenForUser(null, null);
+    setIsPartnerVerified(false);
     setStructureProfileState(null);
   };
 
-  const setStructureProfile = (profile: StructureProfile | null) => {
-    setStructureProfileState(profile);
-    if (typeof window !== "undefined") {
-      if (profile) {
-        localStorage.setItem(STRUCTURE_STORAGE_KEY, JSON.stringify(profile));
-      } else {
-        localStorage.removeItem(STRUCTURE_STORAGE_KEY);
-      }
-    }
-  };
+  const setStructureProfile = (profile: StructureProfile | null, userIdOverride?: string) => {
+    // Invalider toute hydratation antérieure en vol pour éviter une course
+    hydrateSeqRef.current += 1;
 
-  const loadRoles = async (uid: string | undefined) => {
-    if (!uid) { setRoles([]); return; }
-    const { data } = await supabase.from("user_roles").select("role").eq("user_id", uid);
-    setRoles((data ?? []).map((r) => r.role as AppRole));
+    if (!profile) {
+      writeStoredTokenForUser(null, null);
+      setIsPartnerVerified(false);
+      setStructureProfileState(null);
+      return;
+    }
+
+    const effectiveUid = userIdOverride || session?.user?.id || null;
+    if (profile.partnerToken) {
+      writeStoredTokenForUser(effectiveUid, profile.partnerToken);
+      setIsPartnerVerified(true);
+    }
+    setStructureProfileState(profile);
   };
 
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-      syncStructureProfile(s?.user);
-      setTimeout(() => loadRoles(s?.user.id), 0);
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setTimeout(() => {
+        void hydrateUserAccess(nextSession);
+      }, 0);
     });
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      syncStructureProfile(data.session?.user);
-      loadRoles(data.session?.user.id).finally(() => setLoading(false));
-    });
+
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        setSession(data.session);
+        await hydrateUserAccess(data.session);
+      })
+      .finally(() => setLoading(false));
+
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  const hasOfficialAccess =
+    Boolean(session?.user) &&
+    (roles.includes("autorite") || roles.includes("admin") || isPartnerVerified);
 
   const value: AuthCtx = {
     session,
     user: session?.user ?? null,
     roles,
     loading,
-    isAutorite:
-      roles.includes("autorite") ||
-      roles.includes("admin") ||
-      Boolean(structureProfile),
-    structureProfile,
+    isAutorite: hasOfficialAccess,
+    structureProfile: hasOfficialAccess ? structureProfile : null,
     setStructureProfile,
     signOut: async () => {
       setStructureProfile(null);
       await supabase.auth.signOut();
     },
-    refreshRoles: async () => loadRoles(session?.user.id),
+    refreshRoles: async () => {
+      await hydrateUserAccess(session);
+    },
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -120,4 +220,4 @@ export function useAuth() {
   const c = useContext(Ctx);
   if (!c) throw new Error("useAuth must be used inside AuthProvider");
   return c;
-}
+}

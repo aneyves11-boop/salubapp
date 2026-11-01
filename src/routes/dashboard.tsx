@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, lazy, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { Card } from "@/components/ui/card";
@@ -9,7 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CATEGORIES, STATUSES, categoryLabel, statusInfo, type Category, type Status } from "@/lib/categories";
-import { detectCommuneFromCoords } from "@/lib/abidjan";
+import {
+  ABIDJAN_COMMUNES,
+  detectCommuneFromCoords,
+  detectCommuneFromText,
+  type AbidjanCommune,
+} from "@/lib/abidjan";
 import {
   fetchSyncedStatuses,
   getLocalSyncedStatuses,
@@ -17,6 +22,10 @@ import {
   subscribeToStatusSync,
   type SyncedStatusEntry,
 } from "@/lib/status-sync";
+import {
+  verifyPartnerTokenServerFn,
+  verifyStructureAccessServerFn,
+} from "@/lib/structure-auth-fn";
 import type { Database } from "@/integrations/supabase/types";
 import {
   Download,
@@ -35,6 +44,7 @@ import {
   TrendingUp,
   ListChecks,
   Wrench,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -63,7 +73,7 @@ const STRUCTURE_TYPES = [
 
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
-    meta: [{ title: "Plateforme des Structures (Mairies, ONG, Opérateurs) — SalubApp" }],
+    meta: [{ title: "Plateforme des Structures Accréditées (Mairies, ONG, Opérateurs) — SalubApp" }],
   }),
   component: StructurePlatformPage,
 });
@@ -132,10 +142,12 @@ function toCsv(reports: EnrichedReport[]): string {
 function StructureHeader({
   structureName,
   structureType,
+  structureCommune,
   onSignOut,
 }: {
   structureName?: string;
   structureType?: string;
+  structureCommune?: string | null;
   onSignOut?: () => void;
 }) {
   return (
@@ -149,11 +161,11 @@ function StructureHeader({
             <div className="flex items-center gap-2">
               <span className="text-base font-bold tracking-tight">SalubApp · Portail Structures</span>
               <span className="hidden rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 sm:inline-block">
-                Mairies · ONG · Opérateurs
+                Accès Accrédité
               </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Plateforme dédiée de gestion, cartographie et suivi des données de salubrité
+              Plateforme réservée aux Mairies, ONG et Opérateurs partenaires
             </div>
           </div>
         </div>
@@ -162,7 +174,10 @@ function StructureHeader({
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
               <div className="text-xs font-semibold text-white">{structureName}</div>
-              <div className="text-[10px] text-emerald-400">{structureType}</div>
+              <div className="text-[10px] text-emerald-400">
+                {structureType}
+                {structureCommune ? ` · 📍 ${structureCommune}` : ""}
+              </div>
             </div>
             <Button
               variant="outline"
@@ -181,13 +196,19 @@ function StructureHeader({
 }
 
 function StructurePlatformPage() {
-  const { user, isAutorite, structureProfile, setStructureProfile, signOut, loading } = useAuth();
+  const { user, isAutorite, structureProfile, setStructureProfile, refreshRoles, signOut, loading } =
+    useAuth();
   const [reports, setReports] = useState<Report[] | null>(null);
 
-  // Formulaire d'inscription / connexion dédié aux structures
+  // Formulaire d'inscription / connexion sécurisé dédié aux structures partenaires
   const [authMode, setAuthMode] = useState<"register" | "login">("register");
+  const [accessCode, setAccessCode] = useState("");
+  const [loginAccessCode, setLoginAccessCode] = useState("");
+  const [needsLoginCode, setNeedsLoginCode] = useState(false);
   const [structureName, setStructureName] = useState("");
   const [structureType, setStructureType] = useState<string>(STRUCTURE_TYPES[0].value);
+  const [structureCommune, setStructureCommune] = useState<string>("all");
+  const [communeManuallySet, setCommuneManuallySet] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -204,6 +225,40 @@ function StructurePlatformPage() {
   const [categoryFilter, setCategoryFilter] = useState<Category | "all">("all");
   const [statusFilter, setStatusFilter] = useState<Status | "all">("all");
   const [sortBy, setSortBy] = useState<"urgency" | "recent">("urgency");
+
+  const assignedCommune: AbidjanCommune | null = useMemo(() => {
+    return (
+      structureProfile?.commune ??
+      detectCommuneFromText(structureProfile?.name) ??
+      null
+    );
+  }, [structureProfile?.commune, structureProfile?.name]);
+
+  const autoScopedKeyRef = useRef<string | null>(null);
+
+  // Filtrage automatique sur la commune de rattachement dès l'ouverture du tableau de bord
+  useEffect(() => {
+    if (!isAutorite) {
+      autoScopedKeyRef.current = null;
+      return;
+    }
+    const profileKey = `${structureProfile?.name ?? ""}:${assignedCommune ?? "all"}`;
+    if (autoScopedKeyRef.current !== profileKey) {
+      autoScopedKeyRef.current = profileKey;
+      setSearchLocality(assignedCommune ?? "");
+    }
+  }, [isAutorite, assignedCommune, structureProfile?.name]);
+
+  // Détection automatique de la commune lors de la saisie du nom de la structure (si non modifiée manuellement)
+  const handleStructureNameChange = (value: string) => {
+    setStructureName(value);
+    if (!communeManuallySet) {
+      const detected = detectCommuneFromText(value);
+      if (detected) {
+        setStructureCommune(detected);
+      }
+    }
+  };
 
   const load = async () => {
     const [{ data }, cloudStatuses] = await Promise.all([
@@ -231,88 +286,298 @@ function StructurePlatformPage() {
 
   const handleStructureAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (authMode === "register" && structureName.trim().length < 2) {
-      toast.error("Veuillez indiquer le nom de votre structure (ex: Mairie de Yopougon, ONG Ivoire Propre)");
-      return;
+
+    if (authMode === "register") {
+      if (!accessCode.trim()) {
+        toast.error("Veuillez saisir votre Code d'accès partenaire délivré par SalubApp.");
+        return;
+      }
+      if (structureName.trim().length < 2) {
+        toast.error("Veuillez indiquer le nom officiel de votre structure (ex: Mairie de Yopougon).");
+        return;
+      }
     }
+
     if (!email.trim() || password.length < 6) {
-      toast.error("Veuillez saisir un email valide et un mot de passe d'au moins 6 caractères");
+      toast.error("Veuillez saisir un email professionnel valide et un mot de passe d'au moins 6 caractères.");
       return;
     }
 
     setAuthLoading(true);
     try {
-      const cleanName =
-        authMode === "register"
-          ? structureName.trim()
-          : email.split("@")[0].replace(/[._-]/g, " ");
-      const chosenType = structureType || "Mairie / Collectivité";
-
-      const metadata = {
-        is_structure: true,
-        structure_name: cleanName,
-        structure_type: chosenType,
-        structure_email: email.trim(),
-      };
+      const cleanEmail = email.trim().toLowerCase();
 
       if (authMode === "register") {
+        // 1. Vérification stricte du code d'accréditation côté serveur (PBKDF2 + signature HMAC)
+        const accRes = await verifyStructureAccessServerFn({
+          data: {
+            accessCode: accessCode.trim(),
+            structureName: structureName.trim(),
+            structureType,
+            commune: structureCommune === "all" ? null : structureCommune,
+            email: cleanEmail,
+          },
+        });
+
+        if (!accRes.ok || !accRes.partnerToken || !accRes.profile) {
+          toast.error("Accès refusé", {
+            description:
+              accRes.error ||
+              "Code d'accès partenaire invalide. Contactez SalubApp pour obtenir une accréditation.",
+          });
+          return;
+        }
+
+        const metadata = {
+          is_structure: true,
+          structure_name: accRes.profile.name,
+          structure_type: accRes.profile.type,
+          structure_commune: accRes.profile.commune ?? null,
+          structure_email: cleanEmail,
+          partner_token: accRes.partnerToken,
+        };
+
+        // Séparer proprement toute éventuelle session citoyenne anonyme précédente
+        if (user && !isAutorite) {
+          await supabase.auth.signOut();
+        }
+
+        let activeUid: string | undefined;
+
         const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: cleanEmail,
           password,
           options: { data: metadata },
         });
 
-        if (signUpErr || !signUpData.session) {
-          if (user) {
-            await supabase.auth.updateUser({ data: metadata });
-          } else {
-            const { error: anonErr } = await supabase.auth.signInAnonymously({
-              options: { data: metadata },
+        if (signUpData?.session?.user) {
+          activeUid = signUpData.session.user.id;
+        } else if (
+          signUpErr &&
+          /already registered|already been registered/i.test(signUpErr.message)
+        ) {
+          const { data: signInData, error: signInErr } =
+            await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password,
             });
-            if (anonErr) throw anonErr;
+
+          if (!signInErr && signInData.session?.user) {
+            await supabase.auth.updateUser({ data: metadata });
+            activeUid = signInData.session.user.id;
+          } else if (
+            signInErr &&
+            !/email not confirmed/i.test(signInErr.message)
+          ) {
+            throw new Error(
+              "Cet email possède déjà un compte, mais le mot de passe saisi est incorrect."
+            );
           }
         }
 
-        setStructureProfile({
-          name: cleanName,
-          type: chosenType,
-          email: email.trim(),
-        });
+        // Si la confirmation d'email Supabase est en attente, on ouvre la session authentifiée
+        // UNIQUEMENT parce que le serveur vient de certifier le code partenaire officiel.
+        if (!activeUid) {
+          const { data: verifiedSessionData, error: verifiedSessionErr } =
+            await supabase.auth.signInAnonymously({
+              options: { data: metadata },
+            });
+          if (verifiedSessionErr || !verifiedSessionData.user) {
+            throw (
+              verifiedSessionErr ||
+              new Error("Impossible d'initialiser la session structure sécurisée.")
+            );
+          }
+          activeUid = verifiedSessionData.user.id;
+        }
 
-        toast.success(`Bienvenue ${cleanName} !`, {
-          description: `Votre espace (${chosenType}) est activé. Vous avez accès à toutes les données de déchets et de signalements.`,
+        setStructureProfile(
+          {
+            name: accRes.profile.name,
+            type: accRes.profile.type,
+            commune: accRes.profile.commune,
+            email: cleanEmail,
+            partnerToken: accRes.partnerToken,
+          },
+          activeUid
+        );
+
+        setSearchLocality(accRes.profile.commune ?? "");
+
+        toast.success(`Accréditation validée : ${accRes.profile.name}`, {
+          description: accRes.profile.commune
+            ? `Tableau de bord automatiquement filtré sur la commune de ${accRes.profile.commune}.`
+            : "Votre espace partenaire est activé.",
         });
       } else {
-        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
-
-        if (signInErr || !signInData.session) {
-          if (!user) {
-            const { error: anonErr } = await supabase.auth.signInAnonymously({
-              options: { data: metadata },
-            });
-            if (anonErr) throw anonErr;
-          }
-          setStructureProfile({
-            name: structureName.trim() || cleanName,
-            type: chosenType,
-            email: email.trim(),
-          });
-        } else {
-          const meta = signInData.user?.user_metadata;
-          setStructureProfile({
-            name: String(meta?.structure_name || structureName.trim() || cleanName),
-            type: String(meta?.structure_type || chosenType),
-            email: email.trim(),
-          });
+        // MODE CONNEXION STRUCTURE : Aucun accès sans identifiants valides + accréditation vérifiée
+        if (user && !isAutorite) {
+          await supabase.auth.signOut();
         }
 
-        toast.success("Connexion structure réussie !");
+        const { data: signInData, error: signInErr } =
+          await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+
+        if (signInErr || !signInData.session?.user) {
+          const isUnconfirmedEmail =
+            signInErr && /email not confirmed/i.test(signInErr.message);
+
+          if (isUnconfirmedEmail) {
+            if (!loginAccessCode.trim()) {
+              setNeedsLoginCode(true);
+              throw new Error(
+                "Votre adresse email n'a pas encore été confirmée. Cliquez sur le lien reçu par email ou saisissez votre Code d'accès partenaire ci-dessous."
+              );
+            }
+
+            const accRes = await verifyStructureAccessServerFn({
+              data: {
+                accessCode: loginAccessCode.trim(),
+                email: cleanEmail,
+              },
+            });
+
+            if (!accRes.ok || !accRes.partnerToken || !accRes.profile) {
+              throw new Error(
+                accRes.error || "Code d'accès partenaire invalide."
+              );
+            }
+
+            const metadata = {
+              is_structure: true,
+              structure_name: accRes.profile.name,
+              structure_type: accRes.profile.type,
+              structure_commune: accRes.profile.commune ?? null,
+              structure_email: cleanEmail,
+              partner_token: accRes.partnerToken,
+            };
+
+            const { data: verifiedSessionData, error: verifiedSessionErr } =
+              await supabase.auth.signInAnonymously({
+                options: { data: metadata },
+              });
+            if (verifiedSessionErr || !verifiedSessionData.user) {
+              throw (
+                verifiedSessionErr ||
+                new Error("Impossible d'ouvrir la session structure.")
+              );
+            }
+
+            setStructureProfile(
+              {
+                name: accRes.profile.name,
+                type: accRes.profile.type,
+                commune: accRes.profile.commune,
+                email: cleanEmail,
+                partnerToken: accRes.partnerToken,
+              },
+              verifiedSessionData.user.id
+            );
+            setSearchLocality(accRes.profile.commune ?? "");
+            toast.success(`Bienvenue ${accRes.profile.name} !`);
+            return;
+          }
+
+          throw new Error("Identifiants incorrects : vérifiez votre email et votre mot de passe.");
+        }
+
+        // L'email + mot de passe sont valides : vérifier l'accréditation structure ou le rôle SQL
+        const signedInUser = signInData.session.user;
+        const meta = signedInUser.user_metadata;
+        const existingToken =
+          typeof meta?.partner_token === "string" ? meta.partner_token : "";
+
+        if (existingToken) {
+          const tokenCheck = await verifyPartnerTokenServerFn({
+            data: { token: existingToken },
+          });
+          if (tokenCheck.valid && tokenCheck.profile) {
+            setStructureProfile(
+              {
+                name: tokenCheck.profile.name,
+                type: tokenCheck.profile.type,
+                commune: tokenCheck.profile.commune,
+                email: cleanEmail,
+                partnerToken: existingToken,
+              },
+              signedInUser.id
+            );
+            setSearchLocality(tokenCheck.profile.commune ?? "");
+            toast.success(`Connexion réussie — ${tokenCheck.profile.name}`);
+            return;
+          }
+        }
+
+        // Vérifier si l'utilisateur possède un rôle officiel SQL ('autorite' ou 'admin')
+        const { data: userRolesData } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", signedInUser.id);
+        const hasDbAuthority = (userRolesData ?? []).some(
+          (r) => r.role === "autorite" || r.role === "admin"
+        );
+
+        if (hasDbAuthority) {
+          await refreshRoles();
+          toast.success("Connexion autorité validée !");
+          return;
+        }
+
+        // Sinon, vérifier si un code d'accès partenaire a été fourni pour accréditer ce compte
+        if (loginAccessCode.trim()) {
+          const accRes = await verifyStructureAccessServerFn({
+            data: {
+              accessCode: loginAccessCode.trim(),
+              structureName:
+                typeof meta?.structure_name === "string" ? meta.structure_name : undefined,
+              structureType:
+                typeof meta?.structure_type === "string" ? meta.structure_type : undefined,
+              email: cleanEmail,
+            },
+          });
+
+          if (!accRes.ok || !accRes.partnerToken || !accRes.profile) {
+            await supabase.auth.signOut();
+            throw new Error(accRes.error || "Code d'accès partenaire invalide.");
+          }
+
+          await supabase.auth.updateUser({
+            data: {
+              is_structure: true,
+              structure_name: accRes.profile.name,
+              structure_type: accRes.profile.type,
+              structure_commune: accRes.profile.commune ?? null,
+              structure_email: cleanEmail,
+              partner_token: accRes.partnerToken,
+            },
+          });
+
+          setStructureProfile(
+            {
+              name: accRes.profile.name,
+              type: accRes.profile.type,
+              commune: accRes.profile.commune,
+              email: cleanEmail,
+              partnerToken: accRes.partnerToken,
+            },
+            signedInUser.id
+          );
+          setSearchLocality(accRes.profile.commune ?? "");
+          toast.success(`Compte accrédité — ${accRes.profile.name}`);
+          return;
+        }
+
+        await supabase.auth.signOut();
+        setNeedsLoginCode(true);
+        throw new Error(
+          "Ce compte n'est pas encore accrédité comme structure partenaire. Renseignez votre Code d'accès partenaire ci-dessous."
+        );
       }
     } catch (err) {
-      toast.error("Erreur lors de l'accès structure", {
+      toast.error("Accès structure refusé", {
         description: (err as Error).message,
       });
     } finally {
@@ -335,15 +600,28 @@ function StructurePlatformPage() {
     });
   }, [reports, syncedStatuses]);
 
+  // Signalements correspondant au périmètre géographique actif (ex: commune de Yopougon)
+  const localityScopedReports = useMemo(() => {
+    const q = normalizeSearch(searchLocality);
+    if (!q) return enrichedReports;
+    return enrichedReports.filter((r) => {
+      const cNorm = r.commune ? normalizeSearch(r.commune) : "";
+      const vNorm = r.ville ? normalizeSearch(r.ville) : "";
+      const dNorm = normalizeSearch(r.description);
+      return cNorm.includes(q) || vNorm.includes(q) || dNorm.includes(q);
+    });
+  }, [enrichedReports, searchLocality]);
+
+  // Les KPIs reflètent directement la commune active (ex: Yopougon) ou tout Abidjan si aucun filtre
   const stats = useMemo(() => {
-    const total = enrichedReports.length;
-    const nouveau = enrichedReports.filter((x) => x.status === "nouveau").length;
-    const en_cours = enrichedReports.filter((x) => x.status === "en_cours").length;
-    const resolu = enrichedReports.filter((x) => x.status === "resolu").length;
-    const dechetsCount = enrichedReports.filter((x) => x.category === "dechets").length;
+    const total = localityScopedReports.length;
+    const nouveau = localityScopedReports.filter((x) => x.status === "nouveau").length;
+    const en_cours = localityScopedReports.filter((x) => x.status === "en_cours").length;
+    const resolu = localityScopedReports.filter((x) => x.status === "resolu").length;
+    const dechetsCount = localityScopedReports.filter((x) => x.category === "dechets").length;
     const resolutionRate = total > 0 ? Math.round((resolu / total) * 100) : 0;
     return { total, nouveau, en_cours, resolu, dechetsCount, resolutionRate };
-  }, [enrichedReports]);
+  }, [localityScopedReports]);
 
   const communeBreakdown = useMemo(() => {
     const counts = new Map<string, number>();
@@ -358,25 +636,18 @@ function StructurePlatformPage() {
 
   const byCategory = useMemo(() => {
     const m = new Map<Category, number>();
-    enrichedReports.forEach((r) =>
+    localityScopedReports.forEach((r) =>
       m.set(r.category as Category, (m.get(r.category as Category) ?? 0) + 1)
     );
     return CATEGORIES.map((c) => ({ ...c, count: m.get(c.value) ?? 0 })).sort(
       (a, b) => b.count - a.count
     );
-  }, [enrichedReports]);
+  }, [localityScopedReports]);
 
   const filtered = useMemo(() => {
-    const q = normalizeSearch(searchLocality);
-    const list = enrichedReports.filter((r) => {
+    const list = localityScopedReports.filter((r) => {
       if (categoryFilter !== "all" && r.category !== categoryFilter) return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
-      if (q) {
-        const cNorm = r.commune ? normalizeSearch(r.commune) : "";
-        const vNorm = r.ville ? normalizeSearch(r.ville) : "";
-        const dNorm = normalizeSearch(r.description);
-        if (!cNorm.includes(q) && !vNorm.includes(q) && !dNorm.includes(q)) return false;
-      }
       return true;
     });
 
@@ -390,38 +661,48 @@ function StructurePlatformPage() {
     return [...list].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-  }, [enrichedReports, categoryFilter, statusFilter, searchLocality, sortBy]);
+  }, [localityScopedReports, categoryFilter, statusFilter, sortBy]);
 
   const updateStatus = async (id: string, s: Status) => {
-    const nextMap = await updateReportStatusSynced({
-      reportId: id,
-      status: s,
-      structureName: structureProfile?.name || "Structure partenaire",
-      structureType: structureProfile?.type || "Mairie / Collectivité",
-    });
-    setSyncedStatuses(nextMap);
+    try {
+      const nextMap = await updateReportStatusSynced({
+        reportId: id,
+        status: s,
+        structureName: structureProfile?.name || "Structure partenaire",
+        structureType: structureProfile?.type || "Mairie / Collectivité",
+        partnerToken: structureProfile?.partnerToken,
+      });
+      setSyncedStatuses(nextMap);
 
-    if (s === "resolu") {
-      toast.success("Signalement marqué « Résolu » ✅", {
-        description:
-          "Synchronisé avec l'interface citoyenne : les votes citoyens sur ce signalement sont désormais clôturés.",
+      if (s === "resolu") {
+        toast.success("Signalement marqué « Résolu » ✅", {
+          description:
+            "Synchronisé avec l'interface citoyenne : les votes citoyens sur ce signalement sont désormais clôturés.",
+        });
+      } else if (s === "en_cours") {
+        toast.success("Statut passé à « En cours » 🚧", {
+          description:
+            "Les citoyens voient désormais que votre structure intervient sur ce signalement.",
+        });
+      } else {
+        toast.success(`Statut mis à jour : ${statusInfo(s).label}`);
+      }
+    } catch (err) {
+      toast.error("Impossible de modifier le statut", {
+        description: (err as Error).message,
       });
-    } else if (s === "en_cours") {
-      toast.success("Statut passé à « En cours » 🚧", {
-        description:
-          "Les citoyens voient désormais que votre structure intervient sur ce signalement.",
-      });
-    } else {
-      toast.success(`Statut mis à jour : ${statusInfo(s).label}`);
     }
   };
 
   const downloadCsv = () => {
+    const scopeSlug = searchLocality
+      ? normalizeSearch(searchLocality).replace(/[^a-z0-9]+/g, "-")
+      : "grand-abidjan";
     const blob = new Blob(["\ufeff" + toCsv(filtered)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `salubapp-donnees-structures-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `salubapp-${scopeSlug}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -437,7 +718,7 @@ function StructurePlatformPage() {
     );
   }
 
-  // ÉCRAN 1 : INSCRIPTION / CONNEXION DÉDIÉ AUX STRUCTURES (totalement séparé des citoyens)
+  // ÉCRAN 1 : PORTAIL VERROUILLÉ PAR CODE D'ACCRÉDITATION PARTENAIRE
   if (!isAutorite) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-background">
@@ -445,11 +726,11 @@ function StructurePlatformPage() {
         <main className="mx-auto max-w-md px-4 py-10">
           <div className="mb-6 flex flex-col items-center text-center">
             <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-700 text-white shadow-lg">
-              <Building2 className="h-7 w-7" />
+              <Lock className="h-7 w-7" />
             </div>
-            <h1 className="text-2xl font-bold">Portail des Structures</h1>
+            <h1 className="text-2xl font-bold">Portail des Structures Accréditées</h1>
             <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
-              Plateforme réservée aux Mairies, ONG, Associations et Opérateurs d'assainissement.
+              Accès sécurisé réservé aux Mairies, Collectivités, ONG et Opérateurs partenaires disposant d'un code d'accréditation SalubApp.
             </p>
           </div>
 
@@ -464,7 +745,7 @@ function StructurePlatformPage() {
                     : "text-muted-foreground"
                 }`}
               >
-                Inscrire ma structure
+                Activer un accès partenaire
               </button>
               <button
                 type="button"
@@ -480,39 +761,86 @@ function StructurePlatformPage() {
             </div>
 
             <form onSubmit={handleStructureAuth} className="space-y-4">
-              <div>
-                <Label htmlFor="structureType" className="text-xs font-semibold">
-                  Quel est le type de votre structure ? *
-                </Label>
-                <Select value={structureType} onValueChange={setStructureType}>
-                  <SelectTrigger id="structureType" className="mt-1.5">
-                    <SelectValue placeholder="Choisissez le type de structure" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STRUCTURE_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
               {authMode === "register" && (
-                <div>
-                  <Label htmlFor="structureName" className="text-xs font-semibold">
-                    Nom de la structure *
-                  </Label>
-                  <Input
-                    id="structureName"
-                    type="text"
-                    required
-                    value={structureName}
-                    onChange={(e) => setStructureName(e.target.value)}
-                    placeholder="Ex: Mairie de Yopougon, ONG Abidjan Propre…"
-                    className="mt-1.5"
-                  />
-                </div>
+                <>
+                  <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 p-3 dark:border-emerald-800 dark:bg-emerald-950/30">
+                    <Label htmlFor="accessCode" className="flex items-center gap-1.5 text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                      <Lock className="h-3.5 w-3.5 text-emerald-700" />
+                      Code d'accès partenaire SalubApp *
+                    </Label>
+                    <Input
+                      id="accessCode"
+                      type="text"
+                      required
+                      autoComplete="off"
+                      value={accessCode}
+                      onChange={(e) => setAccessCode(e.target.value.toUpperCase())}
+                      placeholder="Saisissez le code officiel remis par SalubApp"
+                      className="mt-1.5 bg-background font-mono tracking-wider uppercase"
+                    />
+                    <p className="mt-1 text-[11px] text-emerald-800/80 dark:text-emerald-300/80">
+                      Vérifié côté serveur. Les codes dédiés à une Mairie filtrent automatiquement vos données sur votre commune.
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="structureType" className="text-xs font-semibold">
+                      Type de structure *
+                    </Label>
+                    <Select value={structureType} onValueChange={setStructureType}>
+                      <SelectTrigger id="structureType" className="mt-1.5">
+                        <SelectValue placeholder="Choisissez le type de structure" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {STRUCTURE_TYPES.map((t) => (
+                          <SelectItem key={t.value} value={t.value}>
+                            {t.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="structureName" className="text-xs font-semibold">
+                      Nom officiel de la structure / service *
+                    </Label>
+                    <Input
+                      id="structureName"
+                      type="text"
+                      required
+                      value={structureName}
+                      onChange={(e) => handleStructureNameChange(e.target.value)}
+                      placeholder="Ex: Mairie de Yopougon — Direction Technique"
+                      className="mt-1.5"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="structureCommune" className="text-xs font-semibold">
+                      Commune de rattachement (filtrage automatique)
+                    </Label>
+                    <Select
+                      value={structureCommune}
+                      onValueChange={(v) => {
+                        setStructureCommune(v);
+                        setCommuneManuallySet(true);
+                      }}
+                    >
+                      <SelectTrigger id="structureCommune" className="mt-1.5">
+                        <SelectValue placeholder="Choisissez votre commune" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">🌍 Grand Abidjan (Toutes les communes)</SelectItem>
+                        {ABIDJAN_COMMUNES.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            📍 Commune de {c}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
               )}
 
               <div>
@@ -525,7 +853,7 @@ function StructurePlatformPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="contact@structure.ci"
+                  placeholder="service.salubrite@mairie.ci"
                   className="mt-1.5"
                 />
               </div>
@@ -546,22 +874,58 @@ function StructurePlatformPage() {
                 />
               </div>
 
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+              {authMode === "login" && (
+                <div className="rounded-lg border border-slate-200 bg-muted/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="loginAccessCode" className="flex items-center gap-1.5 text-xs font-semibold">
+                      <Lock className="h-3.5 w-3.5 text-emerald-700" />
+                      Code partenaire {needsLoginCode ? "*" : "(si email non confirmé)"}
+                    </Label>
+                    {!needsLoginCode && (
+                      <button
+                        type="button"
+                        onClick={() => setNeedsLoginCode(true)}
+                        className="text-[11px] font-medium text-emerald-700 underline"
+                      >
+                        J'ai un code
+                      </button>
+                    )}
+                  </div>
+                  {(needsLoginCode || loginAccessCode.length > 0) && (
+                    <Input
+                      id="loginAccessCode"
+                      type="text"
+                      autoComplete="off"
+                      value={loginAccessCode}
+                      onChange={(e) => setLoginAccessCode(e.target.value.toUpperCase())}
+                      placeholder="Saisissez votre code d'accréditation"
+                      className="mt-1.5 bg-background font-mono tracking-wider uppercase"
+                    />
+                  )}
+                </div>
+              )}
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
                 <div className="flex items-start gap-2">
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                   <span>
-                    <strong>Accès complet aux données :</strong> Dès votre inscription validée, peu importe le type de structure choisi (Mairie, ONG, Association…), vous accédez aux mêmes données de déchets et de signalements.
+                    <strong>Accès protégé :</strong> Seules les structures accréditées peuvent consulter le tableau de bord opérationnel et mettre à jour le statut officiel des signalements citoyens.
                   </span>
                 </div>
               </div>
 
-              <Button type="submit" disabled={authLoading} className="w-full bg-emerald-700 hover:bg-emerald-800" size="lg">
+              <Button
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-emerald-700 hover:bg-emerald-800"
+                size="lg"
+              >
                 <Building2 className="mr-2 h-5 w-5" />
                 {authLoading
-                  ? "Ouverture du portail…"
+                  ? "Vérification de l'accréditation…"
                   : authMode === "register"
-                  ? "Valider l'inscription & Accéder aux données"
-                  : "Accéder au tableau de bord"}
+                  ? "Vérifier le code & Ouvrir le portail"
+                  : "Se connecter au tableau de bord"}
               </Button>
             </form>
           </Card>
@@ -570,12 +934,13 @@ function StructurePlatformPage() {
     );
   }
 
-  // ÉCRAN 2 : TABLEAU DE BORD UNIFIÉ DES STRUCTURES (Mairies, ONG, etc.)
+  // ÉCRAN 2 : TABLEAU DE BORD OPÉRATIONNEL DES STRUCTURES ACCRÉDITÉES
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-background">
       <StructureHeader
         structureName={structureProfile?.name || "Structure Partenaire"}
         structureType={structureProfile?.type || "Mairie / ONG"}
+        structureCommune={assignedCommune}
         onSignOut={async () => {
           await signOut();
           toast.success("Vous êtes déconnecté du portail des structures");
@@ -583,37 +948,67 @@ function StructurePlatformPage() {
       />
 
       <main className="mx-auto max-w-6xl px-4 py-6 pb-20">
-        {/* Bannière d'accueil de la structure connectée */}
+        {/* Bannière d'accueil de la structure connectée + Périmètre communal */}
         <div className="mb-6 rounded-2xl border bg-gradient-to-r from-slate-900 to-emerald-800 p-5 text-white shadow-md">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <div className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-0.5 text-xs font-semibold">
-                <Building2 className="h-3.5 w-3.5" />
-                {structureProfile?.type || "Structure Partenaire"}
+              <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-0.5 text-xs font-semibold">
+                  <Building2 className="h-3.5 w-3.5" />
+                  {structureProfile?.type || "Structure Partenaire"}
+                </span>
+                {assignedCommune && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/25 px-3 py-0.5 text-xs font-bold text-emerald-100 ring-1 ring-emerald-300/40">
+                    <MapPin className="h-3.5 w-3.5" />
+                    Commune rattachée : {assignedCommune}
+                  </span>
+                )}
               </div>
               <h1 className="text-2xl font-bold">
                 {structureProfile?.name || "Portail des Structures & Collectivités"}
               </h1>
               <p className="mt-1 text-xs sm:text-sm text-emerald-100">
-                Visualisez la carte des déchets en temps réel et gérez les statuts d'intervention (synchronisés avec la population).
+                {searchLocality
+                  ? `Périmètre affiché : ${searchLocality} (${localityScopedReports.length} signalement${
+                      localityScopedReports.length > 1 ? "s" : ""
+                    }).`
+                  : `Périmètre affiché : Grand Abidjan (${enrichedReports.length} signalement${
+                      enrichedReports.length > 1 ? "s" : ""
+                    }).`}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {assignedCommune &&
+                normalizeSearch(searchLocality) !== normalizeSearch(assignedCommune) && (
+                  <Button
+                    type="button"
+                    onClick={() => setSearchLocality(assignedCommune)}
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 border-emerald-300/50 bg-emerald-950/40 text-xs font-semibold text-white hover:bg-emerald-900 hover:text-white"
+                  >
+                    <MapPin className="h-3.5 w-3.5" />
+                    Recentrer sur {assignedCommune}
+                  </Button>
+                )}
               <Button
                 onClick={downloadCsv}
                 variant="secondary"
                 size="sm"
                 className="gap-1.5 font-semibold"
               >
-                <Download className="h-4 w-4" /> Exporter les données (CSV)
+                <Download className="h-4 w-4" /> Exporter CSV ({filtered.length})
               </Button>
             </div>
           </div>
         </div>
 
-        {/* Indicateurs clés */}
+        {/* Indicateurs clés (dynamiques selon la commune sélectionnée) */}
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
-          <StatCard label="Total signalements" value={stats.total} />
+          <StatCard
+            label={searchLocality ? `Signalements (${searchLocality})` : "Total signalements"}
+            value={stats.total}
+          />
           <StatCard label="Déchets / Ordures" value={stats.dechetsCount} highlight />
           <StatCard label="Nouveaux (À traiter)" value={stats.nouveau} accent />
           <StatCard label="En cours" value={stats.en_cours} />
@@ -621,24 +1016,58 @@ function StructurePlatformPage() {
         </div>
 
         {/* Filtrage rapide par Commune détectée via les images */}
-        {communeBreakdown.length > 0 && (
-          <div className="mb-5 rounded-xl border bg-card p-3.5">
-            <div className="mb-2 text-xs font-semibold text-muted-foreground">
-              📍 Filtrer par commune / localité des signalements :
-            </div>
-            <div className="flex flex-wrap gap-1.5">
+        <div className="mb-5 rounded-xl border bg-card p-3.5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
+            <span>📍 Périmètre communal des signalements :</span>
+            {assignedCommune && (
+              <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                Filtré par défaut sur votre commune ({assignedCommune})
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {assignedCommune && (
               <button
                 type="button"
-                onClick={() => setSearchLocality("")}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                  searchLocality === ""
-                    ? "bg-emerald-700 text-white"
-                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                onClick={() => setSearchLocality(assignedCommune)}
+                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold transition ${
+                  normalizeSearch(searchLocality) === normalizeSearch(assignedCommune)
+                    ? "bg-emerald-700 text-white shadow-sm"
+                    : "border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
                 }`}
               >
-                Toutes les communes ({enrichedReports.length})
+                <MapPin className="h-3 w-3" />
+                Ma commune : {assignedCommune} (
+                {
+                  enrichedReports.filter((r) => {
+                    const q = normalizeSearch(assignedCommune);
+                    return (
+                      (r.commune && normalizeSearch(r.commune).includes(q)) ||
+                      (r.ville && normalizeSearch(r.ville).includes(q))
+                    );
+                  }).length
+                }
+                )
               </button>
-              {communeBreakdown.map((c) => (
+            )}
+            <button
+              type="button"
+              onClick={() => setSearchLocality("")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                searchLocality === ""
+                  ? "bg-slate-900 text-white"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              Toutes les communes ({enrichedReports.length})
+            </button>
+            {communeBreakdown
+              .filter(
+                (c) =>
+                  !assignedCommune ||
+                  normalizeSearch(c.name) !== normalizeSearch(assignedCommune)
+              )
+              .map((c) => (
                 <button
                   key={c.name}
                   type="button"
@@ -652,9 +1081,8 @@ function StructurePlatformPage() {
                   {c.name} ({c.count})
                 </button>
               ))}
-            </div>
           </div>
-        )}
+        </div>
 
         {/* Barre de recherche et filtres */}
         <div className="mb-5 grid grid-cols-1 gap-2.5 sm:grid-cols-4">
@@ -774,7 +1202,7 @@ function StructurePlatformPage() {
           )}
         </div>
 
-        {/* SECTION CARTE GRAPHIQUE DES DÉCHETS & RÉPARTITION (identique à la vue citoyenne + outils structures) */}
+        {/* SECTION CARTE GRAPHIQUE DES DÉCHETS & RÉPARTITION */}
         {activeTab === "map" && (
           <div className="mb-8 grid gap-6 lg:grid-cols-[1fr_320px]">
             {/* Carte Interactive */}
@@ -818,8 +1246,22 @@ function StructurePlatformPage() {
                     <Loader2 className="h-6 w-6 animate-spin" />
                   </div>
                 ) : filtered.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-                    Aucun signalement à afficher sur la carte avec ces filtres.
+                  <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-muted-foreground text-sm">
+                    <span>
+                      Aucun signalement à afficher
+                      {searchLocality ? ` dans le périmètre « ${searchLocality} »` : ""} avec ces filtres.
+                    </span>
+                    {searchLocality && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSearchLocality("")}
+                        className="text-xs"
+                      >
+                        Voir toutes les communes d'Abidjan
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   <Suspense
@@ -830,9 +1272,13 @@ function StructurePlatformPage() {
                     }
                   >
                     {mapMode === "heatmap" ? (
-                      <HeatMap reports={filtered} />
+                      <HeatMap reports={filtered} focusCommune={searchLocality.trim()} />
                     ) : (
-                      <ReportsMap reports={filtered} onSelectStatus={updateStatus} />
+                      <ReportsMap
+                        reports={filtered}
+                        onSelectStatus={updateStatus}
+                        focusCommune={searchLocality.trim()}
+                      />
                     )}
                   </Suspense>
                 )}
@@ -844,6 +1290,7 @@ function StructurePlatformPage() {
               <Card className="p-4 border-slate-200 shadow-sm">
                 <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
                   <TrendingUp className="h-4 w-4 text-emerald-600" /> Répartition par type
+                  {searchLocality ? ` (${searchLocality})` : ""}
                 </div>
                 <div className="space-y-2.5">
                   {byCategory.map((c) => {
@@ -857,7 +1304,9 @@ function StructurePlatformPage() {
                           setCategoryFilter(isSelected ? "all" : (c.value as Category))
                         }
                         className={`block w-full text-left rounded-md p-1 transition ${
-                          isSelected ? "bg-emerald-50 dark:bg-emerald-950/40 ring-1 ring-emerald-500/30" : "hover:bg-muted/60"
+                          isSelected
+                            ? "bg-emerald-50 dark:bg-emerald-950/40 ring-1 ring-emerald-500/30"
+                            : "hover:bg-muted/60"
                         }`}
                       >
                         <div className="flex items-center justify-between text-xs">

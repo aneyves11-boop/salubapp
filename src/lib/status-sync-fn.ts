@@ -56,7 +56,7 @@ function encodeShortNameHex(name?: string): string {
   return hex;
 }
 
-function createEphemeralSupabase() {
+function getSupabaseConfig() {
   const url =
     process.env.VITE_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
@@ -65,13 +65,44 @@ function createEphemeralSupabase() {
     process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
     process.env.SUPABASE_PUBLISHABLE_KEY ||
     "sb_publishable_E915muuQJdNJ112ZQ-RvuQ_H-hihgC8";
+  return { url, key };
+}
 
+function createEphemeralSupabase() {
+  const { url, key } = getSupabaseConfig();
   return createClient<Database>(url, key, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
+}
+
+async function hasAuthorizedDbRole(accessToken?: string): Promise<boolean> {
+  if (!accessToken) return false;
+  try {
+    const { url, key } = getSupabaseConfig();
+    const userClient = createClient<Database>(url, key, {
+      global: {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+    const { data: userData, error: userErr } = await userClient.auth.getUser(accessToken);
+    if (userErr || !userData.user) return false;
+
+    const { data: roles } = await userClient
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userData.user.id);
+
+    return (roles ?? []).some((r) => r.role === "autorite" || r.role === "admin");
+  } catch {
+    return false;
+  }
 }
 
 let cachedServerClient: ReturnType<typeof createEphemeralSupabase> | null = null;
@@ -173,7 +204,7 @@ export const getSyncedStatusesServerFn = createServerFn({ method: "GET" }).handl
 
 /**
  * Enregistre un changement de statut officiel dans le Cloud Supabase
- * lorsqu'une structure (Mairie, ONG, Opérateur) modifie le statut d'un signalement.
+ * uniquement si l'appelant détient un jeton structure signé ou un rôle SQL autorite/admin.
  */
 export const setSyncedStatusServerFn = createServerFn({ method: "POST" })
   .inputValidator(
@@ -182,6 +213,8 @@ export const setSyncedStatusServerFn = createServerFn({ method: "POST" })
       status: Status;
       structureType?: string;
       structureName?: string;
+      partnerToken?: string;
+      accessToken?: string;
     }) => data
   )
   .handler(
@@ -189,6 +222,24 @@ export const setSyncedStatusServerFn = createServerFn({ method: "POST" })
       data,
     }): Promise<{ ok: boolean; entry?: SyncedStatusEntry; error?: string }> => {
       try {
+        const { verifyPartnerTokenServer } = await import("./structure-auth.server");
+        const verifiedPartner = verifyPartnerTokenServer(data.partnerToken);
+        const isRoleAuthorized = verifiedPartner
+          ? true
+          : await hasAuthorizedDbRole(data.accessToken);
+
+        if (!isRoleAuthorized) {
+          return {
+            ok: false,
+            error: "Accès non autorisé : veuillez vous connecter avec une structure accréditée.",
+          };
+        }
+
+        const effectiveStructureName =
+          verifiedPartner?.name || data.structureName || "Structure partenaire";
+        const effectiveStructureType =
+          verifiedPartner?.type || data.structureType || "Mairie / Collectivité";
+
         let { sb, uid } = await getAuthenticatedServerSupabase();
         if (!uid) {
           const fresh = createEphemeralSupabase();
@@ -204,7 +255,6 @@ export const setSyncedStatusServerFn = createServerFn({ method: "POST" })
           uid = authData.user.id;
         }
 
-        // Nettoyer l'éventuel statut précédent de cette session pour ce signalement
         await sb
           .from("report_verifications")
           .delete()
@@ -213,8 +263,8 @@ export const setSyncedStatusServerFn = createServerFn({ method: "POST" })
 
         const customId = buildStatusUuid(
           data.status,
-          data.structureType,
-          data.structureName
+          effectiveStructureType,
+          effectiveStructureName
         );
 
         let { error: insErr } = await sb.from("report_verifications").insert({
@@ -225,7 +275,6 @@ export const setSyncedStatusServerFn = createServerFn({ method: "POST" })
           is_true: data.status !== "resolu",
         });
 
-        // En cas de conflit sur la session cachée, on crée une session fraîche
         if (insErr) {
           const fresh = createEphemeralSupabase();
           const { data: authData } = await fresh.auth.signInAnonymously();
@@ -249,8 +298,8 @@ export const setSyncedStatusServerFn = createServerFn({ method: "POST" })
 
         const entry: SyncedStatusEntry = {
           status: data.status,
-          structureType: data.structureType || "Mairie / Collectivité",
-          structureName: data.structureName,
+          structureType: effectiveStructureType,
+          structureName: effectiveStructureName,
           updatedAt: new Date().toISOString(),
         };
 

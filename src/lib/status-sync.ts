@@ -16,7 +16,6 @@ export function getLocalSyncedStatuses(): Record<string, SyncedStatusEntry> {
   if (typeof window === "undefined") return {};
   const result: Record<string, SyncedStatusEntry> = {};
 
-  // 1. Lire l'ancien format éventuel (Record<string, Status>) pour ne perdre aucun statut déjà modifié
   try {
     const rawLegacy = localStorage.getItem(LOCAL_STATUS_KEY_LEGACY);
     if (rawLegacy) {
@@ -35,7 +34,6 @@ export function getLocalSyncedStatuses(): Record<string, SyncedStatusEntry> {
     // ignore
   }
 
-  // 2. Lire le format enrichi v2
   try {
     const rawV2 = localStorage.getItem(LOCAL_STATUS_KEY_V2);
     if (rawV2) {
@@ -57,7 +55,6 @@ function saveLocalSyncedStatuses(map: Record<string, SyncedStatusEntry>) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(LOCAL_STATUS_KEY_V2, JSON.stringify(map));
-    // Maintenir aussi la clé legacy pour compatibilité
     const legacy: Record<string, Status> = {};
     for (const [id, entry] of Object.entries(map)) {
       legacy[id] = entry.status;
@@ -83,8 +80,7 @@ function notifyAllTabs() {
 }
 
 /**
- * Récupère les statuts synchronisés (Cloud Supabase + LocalStorage)
- * et pousse automatiquement vers le Cloud tout statut local qui n'y était pas encore.
+ * Récupère les statuts officiels synchronisés depuis le Cloud Supabase.
  */
 export async function fetchSyncedStatuses(): Promise<
   Record<string, SyncedStatusEntry>
@@ -95,7 +91,7 @@ export async function fetchSyncedStatuses(): Promise<
   try {
     cloudMap = (await getSyncedStatusesServerFn()) ?? {};
   } catch {
-    // Fallback client-side si besoin
+    return localMap;
   }
 
   const merged: Record<string, SyncedStatusEntry> = { ...localMap };
@@ -114,38 +110,51 @@ export async function fetchSyncedStatuses(): Promise<
     }
   }
 
-  // Si des statuts avaient été modifiés localement avant la mise en place du Cloud, on les synchronise automatiquement vers le Cloud
-  for (const [reportId, localEntry] of Object.entries(localMap)) {
-    const cloudEntry = cloudMap[reportId];
-    if (!cloudEntry || cloudEntry.status !== localEntry.status) {
-      void setSyncedStatusServerFn({
-        data: {
-          reportId,
-          status: localEntry.status,
-          structureType: localEntry.structureType,
-          structureName: localEntry.structureName,
-        },
-      }).catch(() => {});
-    }
-  }
-
   saveLocalSyncedStatuses(merged);
   return merged;
 }
 
 /**
- * Met à jour le statut d'un signalement depuis la plateforme des Structures
- * et le synchronise immédiatement avec la partie Citoyens (Local + Multi-onglets + Cloud Supabase).
+ * Met à jour le statut d'un signalement depuis la plateforme des Structures accréditées
+ * et le synchronise immédiatement avec la partie Citoyens.
  */
 export async function updateReportStatusSynced(params: {
   reportId: string;
   status: Status;
   structureName?: string;
   structureType?: string;
+  partnerToken?: string;
 }): Promise<Record<string, SyncedStatusEntry>> {
-  const { reportId, status, structureName, structureType } = params;
+  const { reportId, status, structureName, structureType, partnerToken } = params;
   const current = getLocalSyncedStatuses();
-  const nextEntry: SyncedStatusEntry = {
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+
+  // 1. Tentative de mise à jour directe sur la table reports (si le compte a le rôle autorite/admin SQL)
+  try {
+    await supabase.from("reports").update({ status }).eq("id", reportId);
+  } catch {
+    // ignore
+  }
+
+  // 2. Synchronisation Cloud vérifiée côté serveur (jeton structure signé ou rôle SQL)
+  const syncRes = await setSyncedStatusServerFn({
+    data: {
+      reportId,
+      status,
+      structureName,
+      structureType,
+      partnerToken,
+      accessToken,
+    },
+  });
+
+  if (!syncRes.ok) {
+    throw new Error(syncRes.error || "Échec de la mise à jour du statut");
+  }
+
+  const nextEntry: SyncedStatusEntry = syncRes.entry ?? {
     status,
     structureName: structureName || "Structure partenaire",
     structureType: structureType || "Mairie / Collectivité",
@@ -159,28 +168,6 @@ export async function updateReportStatusSynced(params: {
 
   saveLocalSyncedStatuses(nextMap);
   notifyAllTabs();
-
-  // 1. Tentative de mise à jour directe sur la table reports (si le compte a le rôle autorite SQL)
-  try {
-    await supabase.from("reports").update({ status }).eq("id", reportId);
-  } catch {
-    // ignore
-  }
-
-  // 2. Synchronisation Cloud universelle via Server Function (visible par tous les citoyens et appareils)
-  try {
-    await setSyncedStatusServerFn({
-      data: {
-        reportId,
-        status,
-        structureName,
-        structureType,
-      },
-    });
-    notifyAllTabs();
-  } catch (err) {
-    console.warn("Cloud status sync warning:", err);
-  }
 
   return nextMap;
 }

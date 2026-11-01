@@ -23,7 +23,7 @@ export function AppHeader() {
           />
           <div>
             <div className="text-base font-bold leading-none">SalubApp</div>
-            <div className="text-[10px] text-muted-foreground">Pour des villes propres · AXY GROUP</div>
+            <div className="text-[10px] text-muted-foreground">Pour des villes propres</div>
           </div>
         </Link>
         <nav className="flex items-center gap-1.5">

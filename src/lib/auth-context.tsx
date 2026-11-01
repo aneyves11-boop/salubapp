@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { detectCommuneFromText, type AbidjanCommune } from "@/lib/abidjan";
-import { verifyPartnerTokenServerFn } from "@/lib/structure-auth-fn";
+import { verifyPartnerTokenServerFn, verifyAdminSessionServerFn } from "@/lib/structure-auth-fn";
 
 export type AppRole = "citoyen" | "autorite" | "admin";
 
@@ -16,6 +16,30 @@ export type StructureProfile = {
 
 const LEGACY_STRUCTURE_STORAGE_KEY = "salubapp_structure_profile";
 const PARTNER_TOKEN_STORAGE_KEY = "salubapp_partner_token_v2";
+const ADMIN_TOKEN_STORAGE_KEY = "salubapp_admin_token_v2";
+
+export function readStoredAdminToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+    return raw && raw.length > 10 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredAdminToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (token) {
+      localStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+    } else {
+      localStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
 
 interface StoredPartnerToken {
   userId: string;
@@ -62,6 +86,7 @@ interface AuthCtx {
   isAutorite: boolean;
   structureProfile: StructureProfile | null;
   setStructureProfile: (profile: StructureProfile | null, userIdOverride?: string) => void;
+  setAdminToken: (token: string | null) => void;
   signOut: () => Promise<void>;
   refreshRoles: () => Promise<void>;
 }
@@ -81,6 +106,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const currentUser = currentSession?.user ?? null;
 
     if (!currentUser) {
+      // Vérifier si un token admin signé existe
+      const candidateAdminToken = readStoredAdminToken();
+      if (candidateAdminToken) {
+        const adminRes = await verifyAdminSessionServerFn({
+          data: { adminToken: candidateAdminToken },
+        }).catch(() => ({ ok: false, valid: false }));
+        if (seq === hydrateSeqRef.current && (adminRes.ok || adminRes.valid)) {
+          setRoles(["admin"]);
+          return;
+        }
+      }
       setRoles([]);
       setIsPartnerVerified(false);
       setStructureProfileState(null);
@@ -92,8 +128,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (typeof meta?.partner_token === "string" && meta.partner_token.length > 10
         ? meta.partner_token
         : null) || readStoredTokenForUser(currentUser.id);
+    const candidateAdminToken = readStoredAdminToken();
 
-    const [rolesRes, tokenRes] = await Promise.all([
+    const [rolesRes, tokenRes, adminRes] = await Promise.all([
       supabase.from("user_roles").select("role").eq("user_id", currentUser.id),
       candidateToken
         ? verifyPartnerTokenServerFn({ data: { token: candidateToken } }).catch(() => ({
@@ -101,11 +138,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             profile: undefined,
           }))
         : Promise.resolve({ valid: false as const, profile: undefined }),
+      candidateAdminToken || currentSession?.access_token
+        ? verifyAdminSessionServerFn({
+            data: {
+              adminToken: candidateAdminToken || undefined,
+              accessToken: currentSession?.access_token || undefined,
+            },
+          }).catch(() => ({ ok: false, valid: false, adminToken: undefined }))
+        : Promise.resolve({ ok: false, valid: false, adminToken: undefined }),
     ]);
 
     if (seq !== hydrateSeqRef.current) return;
 
     const loadedRoles = (rolesRes.data ?? []).map((r) => r.role as AppRole);
+    if ((adminRes.ok || adminRes.valid) && !loadedRoles.includes("admin")) {
+      loadedRoles.push("admin");
+      if (adminRes.adminToken) {
+        writeStoredAdminToken(adminRes.adminToken);
+      }
+    }
     setRoles(loadedRoles);
 
     if (tokenRes.valid && tokenRes.profile && candidateToken) {
@@ -204,9 +255,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAutorite: hasOfficialAccess,
     structureProfile: hasOfficialAccess ? structureProfile : null,
     setStructureProfile,
+    setAdminToken: (token: string | null) => {
+      writeStoredAdminToken(token);
+    },
     signOut: async () => {
       setStructureProfile(null);
+      writeStoredTokenForUser(null, null);
+      writeStoredAdminToken(null);
       await supabase.auth.signOut();
+      setRoles([]);
     },
     refreshRoles: async () => {
       await hydrateUserAccess(session);

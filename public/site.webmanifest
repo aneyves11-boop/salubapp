@@ -1,7 +1,7 @@
 {
-  "name": "SalubApp — AXY GROUP",
+  "name": "SalubApp",
   "short_name": "SalubApp",
-  "description": "Plateforme citoyenne et municipale de gestion de la salubrité urbaine — Conçue par AXY GROUP.",
+  "description": "Plateforme citoyenne et municipale de gestion de la salubrité urbaine.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#d0f5e3",

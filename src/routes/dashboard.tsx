@@ -169,7 +169,7 @@ function StructureHeader({
               </span>
             </div>
             <div className="text-[11px] text-slate-400">
-              Plateforme réservée aux Mairies, ONG et Opérateurs partenaires · AXY GROUP
+              Plateforme réservée aux Mairies, ONG et Opérateurs partenaires
             </div>
           </div>
         </div>
@@ -226,12 +226,8 @@ function StructureFooter() {
             <div className="font-medium text-foreground">
               © {new Date().getFullYear()} SalubApp · Portail des Structures
             </div>
-            <div className="inline-flex items-center gap-1 text-[11px]">
-              <Sparkles className="h-3 w-3 text-emerald-600" />
-              Conçu et développé par{" "}
-              <strong className="font-bold tracking-wide text-emerald-700 dark:text-emerald-400">
-                AXY GROUP
-              </strong>
+            <div className="text-[11px] text-muted-foreground">
+              Plateforme municipale pour des villes propres
             </div>
           </div>
         </div>
@@ -997,7 +993,7 @@ function StructurePlatformPage() {
           <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-center text-xs text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
             Vous représentez une <strong>Mairie</strong>, une <strong>ONG</strong> ou un <strong>Opérateur</strong> et n'avez pas encore de code d'accès ?{" "}
             <Link to="/contact" className="inline-flex items-center gap-1 font-bold text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300">
-              <Mail className="h-3 w-3" /> Contactez AXY GROUP
+              <Mail className="h-3 w-3" /> Contactez-nous
             </Link>
           </div>
         </main>

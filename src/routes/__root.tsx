@@ -39,15 +39,15 @@ export const Route = createRootRoute({
       {
         name: "description",
         content:
-          "Plateforme citoyenne et municipale pour signaler et résoudre les problèmes d'insalubrité urbaine à Abidjan. Conçue par AXY GROUP.",
+          "Plateforme citoyenne et municipale pour signaler et résoudre les problèmes d'insalubrité urbaine à Abidjan.",
       },
-      { name: "author", content: "AXY GROUP" },
-      { property: "og:site_name", content: "SalubApp · AXY GROUP" },
+      { name: "author", content: "SalubApp" },
+      { property: "og:site_name", content: "SalubApp" },
       { property: "og:title", content: "SalubApp — Signalez l'insalubrité dans votre quartier" },
       {
         property: "og:description",
         content:
-          "Plateforme citoyenne et municipale pour signaler et résoudre les problèmes d'insalubrité urbaine à Abidjan. Conçue par AXY GROUP.",
+          "Plateforme citoyenne et municipale pour signaler et résoudre les problèmes d'insalubrité urbaine à Abidjan.",
       },
       { property: "og:type", content: "website" },
       { property: "og:image", content: "/og-salubapp.png" },
@@ -56,7 +56,7 @@ export const Route = createRootRoute({
       {
         name: "twitter:description",
         content:
-          "Plateforme citoyenne et municipale pour signaler et résoudre les problèmes d'insalubrité urbaine à Abidjan. Conçue par AXY GROUP.",
+          "Plateforme citoyenne et municipale pour signaler et résoudre les problèmes d'insalubrité urbaine à Abidjan.",
       },
       { name: "twitter:image", content: "/og-salubapp.png" },
     ],

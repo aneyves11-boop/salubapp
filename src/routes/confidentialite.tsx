@@ -36,7 +36,7 @@ function PrivacyPage() {
           <p className="mt-2 text-sm text-muted-foreground">Dernière mise à jour : {updated}</p>
           <p className="mt-4 text-base text-muted-foreground">
             SalubApp est une plateforme citoyenne de signalement de l'insalubrité urbaine et des
-            chantiers à Abidjan, conçue et développée par <strong>AXY GROUP</strong>. Cette politique explique, en termes simples, quelles données nous
+            chantiers à Abidjan. Cette politique explique, en termes simples, quelles données nous
             collectons, pourquoi, et comment nous les protégeons.
           </p>
         </header>
@@ -119,9 +119,9 @@ function PrivacyPage() {
           </ul>
         </Section>
 
-        <Section icon={Mail} title="7. Contact — AXY GROUP">
+        <Section icon={Mail} title="7. Contact">
           <p>
-            Pour toute question concernant cette politique, pour exercer vos droits ou pour un partenariat municipal, écrivez directement à l'équipe <strong>AXY GROUP</strong> via notre page{" "}
+            Pour toute question concernant cette politique, pour exercer vos droits ou pour un partenariat municipal, écrivez directement à l'équipe <strong>SalubApp</strong> via notre page{" "}
             <Link to="/contact" className="font-semibold text-emerald-700 underline">
               Nous contacter
             </Link>

@@ -58,11 +58,43 @@ export const verifyPartnerTokenServerFn = createServerFn({ method: "POST" })
     }
   );
 
+export const verifyAdminSessionServerFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    (data: {
+      accessToken?: string;
+      adminToken?: string;
+      adminKey?: string;
+    }) => data
+  )
+  .handler(
+    async ({
+      data,
+    }): Promise<{
+      ok: boolean;
+      valid?: boolean;
+      adminToken?: string;
+      email?: string;
+      error?: string;
+    }> => {
+      const { authenticateOrGrantAdmin, verifyAdminTokenServer } = await import(
+        "./structure-auth.server"
+      );
+      if (data.adminToken) {
+        const verified = verifyAdminTokenServer(data.adminToken);
+        if (verified.valid) {
+          return { ok: true, valid: true, adminToken: data.adminToken, email: verified.email };
+        }
+      }
+      return authenticateOrGrantAdmin(data);
+    }
+  );
+
 export const generateStructureAccessCodeServerFn = createServerFn({ method: "POST" })
   .inputValidator(
     (data: {
       commune?: string | null;
-      accessToken: string;
+      accessToken?: string;
+      adminToken?: string;
     }) => data
   )
   .handler(

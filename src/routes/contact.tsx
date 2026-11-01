@@ -24,11 +24,11 @@ const CONTACT_PROFILES = [
 export const Route = createFileRoute("/contact")({
   head: () => ({
     meta: [
-      { title: "Nous contacter — SalubApp · AXY GROUP" },
+      { title: "Nous contacter — SalubApp" },
       {
         name: "description",
         content:
-          "Contactez l'équipe AXY GROUP pour demander un code d'accès structure (Mairie, ONG, Opérateur), nouer un partenariat ou poser une question sur SalubApp.",
+          "Contactez l'équipe SalubApp pour demander un code d'accès structure (Mairie, ONG, Opérateur), nouer un partenariat ou poser une question sur SalubApp.",
       },
     ],
   }),
@@ -79,7 +79,7 @@ function ContactPage() {
     }
 
     setSent(true);
-    toast.success("Votre message a bien été transmis à AXY GROUP !");
+    toast.success("Votre message a bien été transmis à l'équipe SalubApp !");
   };
 
   return (
@@ -101,12 +101,12 @@ function ContactPage() {
               className="h-12 w-12 rounded-2xl object-cover shadow-md"
             />
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-              <Sparkles className="h-3.5 w-3.5" /> AXY GROUP
+              <Sparkles className="h-3.5 w-3.5" /> Support officiel
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold">Nous contacter</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            SalubApp est une solution conçue et développée par <strong>AXY GROUP</strong> pour accompagner les communes, les opérateurs et les citoyens vers des villes plus propres.
+            SalubApp accompagne les communes, les opérateurs et les citoyens vers des villes plus propres.
           </p>
         </header>
 
@@ -133,9 +133,9 @@ function ContactPage() {
             <div className="flex items-start gap-2.5">
               <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
               <div className="text-xs">
-                <div className="font-bold text-foreground">Équipe AXY GROUP</div>
+                <div className="font-bold text-foreground">Équipe SalubApp</div>
                 <p className="mt-1 text-muted-foreground">
-                  Grand Abidjan, Côte d'Ivoire — Partenariats institutionnels, sponsoring RSE, API urbaine et support technique.
+                  Grand Abidjan, Côte d'Ivoire — Partenariats institutionnels, accompagnement des communes, API urbaine et support technique.
                 </p>
               </div>
             </div>
@@ -145,7 +145,7 @@ function ContactPage() {
         {sent ? (
           <Card className="p-8 text-center shadow-sm">
             <CheckCircle2 className="mx-auto mb-3 h-12 w-12 text-emerald-600" />
-            <h2 className="text-xl font-bold">Message envoyé à AXY GROUP !</h2>
+            <h2 className="text-xl font-bold">Message envoyé avec succès !</h2>
             <p className="mt-2 text-sm text-muted-foreground">
               Merci pour votre message. Notre équipe vous recontactera rapidement via les coordonnées indiquées ({contactCoord}).
             </p>
@@ -168,7 +168,7 @@ function ContactPage() {
           <Card className="p-6 shadow-sm">
             <div className="mb-4 flex items-center gap-2 text-base font-semibold">
               <Mail className="h-4 w-4 text-emerald-600" />
-              Écrire à l'équipe AXY GROUP
+              Écrire à l'équipe SalubApp
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -265,7 +265,7 @@ function ContactPage() {
                 size="lg"
               >
                 <Send className="h-4 w-4" />
-                {busy ? "Envoi en cours…" : "Envoyer le message à AXY GROUP"}
+                {busy ? "Envoi en cours…" : "Envoyer le message"}
               </Button>
             </form>
           </Card>

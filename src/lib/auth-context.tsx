@@ -257,6 +257,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStructureProfile,
     setAdminToken: (token: string | null) => {
       writeStoredAdminToken(token);
+      if (token) {
+        setRoles((prev) => (prev.includes("admin") ? prev : [...prev, "admin"]));
+      } else {
+        setRoles((prev) => prev.filter((r) => r !== "admin"));
+      }
     },
     signOut: async () => {
       setStructureProfile(null);

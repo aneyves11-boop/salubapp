@@ -75,17 +75,19 @@ function HomePage() {
   };
 
   const load = async () => {
-    // Visiteurs anonymes : on lit la vue publique (sans user_id, coordonnées floutées).
-    // Utilisateurs connectés : table complète (nécessaire pour vérifier/voter/commenter).
-    const source = user ? "reports" : "reports_public";
+    const { data: sessionRes } = await supabase.auth.getSession();
+    const activeUser = sessionRes.session?.user ?? user;
+    // Visiteurs sans jeton actif : vue publique (coordonnées arrondies).
+    // Session technique active : table complète nécessaire pour vérifier/voter/commenter.
+    const source = activeUser ? "reports" : "reports_public";
     const [{ data }, cloudStatuses] = await Promise.all([
       (supabase as any).from(source).select("*").order("created_at", { ascending: false }).limit(200),
       fetchSyncedStatuses(),
     ]);
     setSyncedStatuses(cloudStatuses);
     setReports((data ?? []) as Report[]);
-    if (user && data && data.length) {
-      const { data: votes } = await supabase.from("report_votes").select("report_id").eq("user_id", user.id);
+    if (activeUser && data && data.length) {
+      const { data: votes } = await supabase.from("report_votes").select("report_id").eq("user_id", activeUser.id);
       setVotedIds(new Set((votes ?? []).map((v) => v.report_id)));
     } else {
       setVotedIds(new Set());
@@ -193,7 +195,7 @@ function HomePage() {
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button asChild variant="secondary" size="lg" className="gap-1">
-                  <Link to={user ? "/signaler" : "/login"}>
+                  <Link to="/signaler">
                     <PlusCircle className="h-5 w-5" /> Signaler maintenant
                   </Link>
                 </Button>
@@ -295,7 +297,7 @@ function HomePage() {
             {reports && sortedAndFiltered.length === 0 && (
               <div className="rounded-xl border-2 border-dashed border-border bg-muted/30 p-10 text-center">
                 <p className="text-muted-foreground">Aucun signalement pour le moment.</p>
-                <Button asChild className="mt-4"><Link to={user ? "/signaler" : "/login"}>Soyez le premier à signaler</Link></Button>
+                <Button asChild className="mt-4"><Link to="/signaler">Soyez le premier à signaler</Link></Button>
               </div>
             )}
             <div className="grid gap-4 sm:grid-cols-2">

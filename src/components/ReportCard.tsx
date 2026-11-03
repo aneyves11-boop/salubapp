@@ -20,7 +20,7 @@ type Comment = { id: string; content: string; created_at: string; user_id: strin
 export function ReportCard({ report, hasVoted, onVoteChange }: {
   report: Report; hasVoted: boolean; onVoteChange: () => void; distanceMeters?: number;
 }) {
-  const { user } = useAuth();
+  const { user, ensureCitizenSession } = useAuth();
   const [busy, setBusy] = useState(false);
   const [verifBusy, setVerifBusy] = useState(false);
   const [myVerif, setMyVerif] = useState<boolean | null>(null);
@@ -57,15 +57,20 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
       toast.info("Ce signalement est clôturé : les votes ne sont plus possibles.");
       return;
     }
-    if (!user) { toast.info("Connectez-vous pour vérifier"); return; }
     setVerifBusy(true);
+    const activeUser = user ?? (await ensureCitizenSession());
+    if (!activeUser) {
+      setVerifBusy(false);
+      toast.error("Action temporairement indisponible. Vérifiez votre connexion.");
+      return;
+    }
     if (myVerif === isTrue) {
       await supabase.from("report_verifications").delete()
-        .eq("report_id", report.id).eq("user_id", user.id).eq("kind", "veracite");
+        .eq("report_id", report.id).eq("user_id", activeUser.id).eq("kind", "veracite");
       setMyVerif(null);
     } else {
       const { error } = await supabase.from("report_verifications")
-        .upsert({ report_id: report.id, user_id: user.id, is_true: isTrue, kind: "veracite" }, { onConflict: "report_id,user_id,kind" });
+        .upsert({ report_id: report.id, user_id: activeUser.id, is_true: isTrue, kind: "veracite" }, { onConflict: "report_id,user_id,kind" });
       if (error) toast.error(error.message); else setMyVerif(isTrue);
     }
     setVerifBusy(false);
@@ -78,15 +83,20 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
       toast.info("Ce signalement est déjà résolu : les votes sont clôturés.");
       return;
     }
-    if (!user) { toast.info("Connectez-vous pour signaler le statut"); return; }
     setStatusBusy(true);
+    const activeUser = user ?? (await ensureCitizenSession());
+    if (!activeUser) {
+      setStatusBusy(false);
+      toast.error("Action temporairement indisponible. Vérifiez votre connexion.");
+      return;
+    }
     if (myStatus === isPersistent) {
       await supabase.from("report_verifications").delete()
-        .eq("report_id", report.id).eq("user_id", user.id).eq("kind", "persistance");
+        .eq("report_id", report.id).eq("user_id", activeUser.id).eq("kind", "persistance");
       setMyStatus(null);
     } else {
       const { error } = await supabase.from("report_verifications")
-        .upsert({ report_id: report.id, user_id: user.id, is_true: isPersistent, kind: "persistance" }, { onConflict: "report_id,user_id,kind" });
+        .upsert({ report_id: report.id, user_id: activeUser.id, is_true: isPersistent, kind: "persistance" }, { onConflict: "report_id,user_id,kind" });
       if (error) toast.error(error.message); else setMyStatus(isPersistent);
     }
     setStatusBusy(false);
@@ -107,12 +117,17 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
       toast.info("Ce signalement est résolu : il n'est plus possible de voter.");
       return;
     }
-    if (!user) { toast.info("Connectez-vous pour voter"); return; }
     setBusy(true);
+    const activeUser = user ?? (await ensureCitizenSession());
+    if (!activeUser) {
+      setBusy(false);
+      toast.error("Action temporairement indisponible. Vérifiez votre connexion.");
+      return;
+    }
     if (hasVoted) {
-      await supabase.from("report_votes").delete().eq("report_id", report.id).eq("user_id", user.id);
+      await supabase.from("report_votes").delete().eq("report_id", report.id).eq("user_id", activeUser.id);
     } else {
-      const { error } = await supabase.from("report_votes").insert({ report_id: report.id, user_id: user.id });
+      const { error } = await supabase.from("report_votes").insert({ report_id: report.id, user_id: activeUser.id });
       if (error && !error.message.includes("duplicate")) toast.error(error.message);
     }
     setBusy(false);
@@ -135,12 +150,17 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
   };
 
   const submitComment = async () => {
-    if (!user) { toast.info("Connectez-vous pour commenter"); return; }
     if (!newComment.trim()) return;
     setSubmittingComment(true);
+    const activeUser = user ?? (await ensureCitizenSession());
+    if (!activeUser) {
+      setSubmittingComment(false);
+      toast.error("Action temporairement indisponible. Vérifiez votre connexion.");
+      return;
+    }
     const { error } = await (supabase as any).from("report_comments").insert({
       report_id: report.id,
-      user_id: user.id,
+      user_id: activeUser.id,
       content: newComment.trim(),
     });
     if (error) { toast.error(error.message); } else {
@@ -288,7 +308,7 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
                   {comments.filter((c) => c.approved).map((c) => (
                     <div key={c.id} className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
                       <div className="flex items-center justify-between gap-2 text-muted-foreground mb-1">
-                        <span className="font-medium">Citoyen anonyme</span>
+                        <span className="font-medium">Citoyen engagé</span>
                         <span className="shrink-0">{new Date(c.created_at).toLocaleDateString("fr-FR")}</span>
                       </div>
                       <p className="whitespace-pre-wrap">{c.content}</p>
@@ -306,27 +326,23 @@ export function ReportCard({ report, hasVoted, onVoteChange }: {
                 </>
               )}
 
-              {user ? (
-                <div className="space-y-1">
-                  <div className="flex gap-2">
-                    <Textarea
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Ajouter un commentaire (validé par un modérateur)…"
-                      maxLength={1000}
-                      rows={2}
-                      className="text-xs resize-none"
-                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
-                    />
-                    <Button size="icon" variant="outline" disabled={submittingComment || !newComment.trim()} onClick={submitComment} className="shrink-0 self-end h-8 w-8">
-                      <Send className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">Les commentaires sont publiés après validation par un modérateur.</p>
+              <div className="space-y-1">
+                <div className="flex gap-2">
+                  <Textarea
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Ajouter un commentaire (validé par un modérateur)…"
+                    maxLength={1000}
+                    rows={2}
+                    className="text-xs resize-none"
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
+                  />
+                  <Button size="icon" variant="outline" disabled={submittingComment || !newComment.trim()} onClick={submitComment} className="shrink-0 self-end h-8 w-8">
+                    <Send className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">Continuez en mode anonyme pour laisser un commentaire.</p>
-              )}
+                <p className="text-[10px] text-muted-foreground">Les commentaires sont publiés après validation par un modérateur.</p>
+              </div>
             </div>
           )}
         </div>

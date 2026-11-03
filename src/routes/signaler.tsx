@@ -79,7 +79,7 @@ export const Route = createFileRoute("/signaler")({
 });
 
 function SignalerPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, ensureCitizenSession } = useAuth();
   const navigate = useNavigate();
   const [category, setCategory] = useState<Category | null>(null);
   const [description, setDescription] = useState("");
@@ -117,8 +117,10 @@ function SignalerPage() {
   const [confirmingDuplicate, setConfirmingDuplicate] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !user) navigate({ to: "/login" });
-  }, [user, authLoading, navigate]);
+    if (!authLoading && !user) {
+      void ensureCitizenSession();
+    }
+  }, [user, authLoading, ensureCitizenSession]);
 
   // Autocomplétion d'adresses uniquement quand le mode "address" est ouvert
   useEffect(() => {
@@ -248,12 +250,16 @@ function SignalerPage() {
   }, [coords?.lat, coords?.lng, category, photo, duplicateIgnored]);
 
   const confirmDuplicate = async () => {
-    if (!user || !nearbyDuplicate) return;
+    if (!nearbyDuplicate) return;
     setConfirmingDuplicate(true);
     try {
+      const activeUser = user ?? (await ensureCitizenSession());
+      if (!activeUser) {
+        throw new Error("Impossible d'initialiser l'accès sécurisé. Vérifiez votre connexion.");
+      }
       const { error } = await supabase.from("report_votes").insert({
         report_id: nearbyDuplicate.id,
-        user_id: user.id,
+        user_id: activeUser.id,
       });
       if (error && !error.message.includes("duplicate")) throw error;
       toast.success(
@@ -515,7 +521,6 @@ function SignalerPage() {
   };
 
   const submit = async () => {
-    if (!user) return;
     if (!category) {
       toast.error("Choisissez une catégorie");
       return;
@@ -543,10 +548,15 @@ function SignalerPage() {
 
     setSubmitting(true);
     try {
+      const activeUser = user ?? (await ensureCitizenSession());
+      if (!activeUser) {
+        throw new Error("Impossible d'initialiser l'accès sécurisé. Vérifiez votre connexion internet.");
+      }
+
       let photo_url: string | null = null;
       if (photo) {
         const ext = (photo.name.split(".").pop() || "jpg").toLowerCase();
-        const path = `${user.id}/${Date.now()}.${ext}`;
+        const path = `${activeUser.id}/${Date.now()}.${ext}`;
         const { error: upErr } = await supabase.storage.from("report-photos").upload(path, photo, {
           cacheControl: "3600",
           contentType: photo.type || "image/jpeg",
@@ -556,7 +566,7 @@ function SignalerPage() {
         photo_url = pub.publicUrl;
       }
       const { error } = await supabase.from("reports").insert({
-        user_id: user.id,
+        user_id: activeUser.id,
         category,
         description: description.trim(),
         photo_url,
@@ -585,7 +595,7 @@ function SignalerPage() {
         </Link>
         <h1 className="mb-1 text-2xl font-bold">Nouveau signalement</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          Remplissez en moins d'une minute. Photo et position aident énormément.
+          Accès direct sans inscription — remplissez en moins d'une minute, votre identité reste 100 % protégée.
         </p>
 
         <div className="space-y-5">

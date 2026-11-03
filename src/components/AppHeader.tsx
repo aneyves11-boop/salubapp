@@ -1,17 +1,14 @@
-import { Link, useNavigate } from "@tanstack/react-router";
-import { useAuth } from "@/lib/auth-context";
+import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { LogOut, PlusCircle, Flame, UserCircle2, Lock, Mail } from "lucide-react";
+import { PlusCircle, Flame, ShieldCheck, Mail } from "lucide-react";
 
 export function AppHeader() {
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
-
   return (
     <header className="sticky top-0 z-40 border-b bg-card/95 backdrop-blur">
       <div className="bg-emerald-50 px-4 py-1 text-center text-[11px] text-emerald-900">
-        <Link to="/confidentialite" className="inline-flex items-center gap-1 font-medium hover:underline">
-          <Lock className="h-3 w-3" /> Mode 100% anonyme — voir notre politique de confidentialité
+        <Link to="/confidentialite" className="inline-flex items-center gap-1.5 font-medium hover:underline">
+          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
+          <span>Accès libre sans inscription • Identité 100 % protégée — Politique de confidentialité</span>
         </Link>
       </div>
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
@@ -33,31 +30,9 @@ export function AppHeader() {
           <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
             <Link to="/contact"><Mail className="mr-1 h-4 w-4" />Nous contacter</Link>
           </Button>
-          {user ? (
-            <>
-              <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 sm:inline-flex">
-                <UserCircle2 className="h-3 w-3" /> Anonyme
-              </span>
-              <Button asChild size="sm" className="gap-1">
-                <Link to="/signaler"><PlusCircle className="h-4 w-4" />Signaler</Link>
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={async () => {
-                  await signOut();
-                  navigate({ to: "/" });
-                }}
-                aria-label="Déconnexion"
-              >
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </>
-          ) : (
-            <Button asChild size="sm" className="gap-1">
-              <Link to="/login"><PlusCircle className="h-4 w-4" />Signaler</Link>
-            </Button>
-          )}
+          <Button asChild size="sm" className="gap-1">
+            <Link to="/signaler"><PlusCircle className="h-4 w-4" />Signaler</Link>
+          </Button>
         </nav>
       </div>
     </header>

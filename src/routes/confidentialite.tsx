@@ -11,7 +11,7 @@ export const Route = createFileRoute("/confidentialite")({
       {
         name: "description",
         content:
-          "Comment SalubApp protège votre vie privée : mode anonyme, floutage des visages, anonymisation des coordonnées GPS.",
+          "Comment SalubApp protège votre vie privée : accès libre sans inscription, identité 100 % protégée, floutage des visages et protection des coordonnées GPS.",
       },
     ],
   }),
@@ -19,7 +19,7 @@ export const Route = createFileRoute("/confidentialite")({
 });
 
 function PrivacyPage() {
-  const updated = "30 avril 2026";
+  const updated = "3 novembre 2026";
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <AppHeader />
@@ -46,7 +46,7 @@ function PrivacyPage() {
             <Lock className="h-5 w-5" /> En résumé
           </h2>
           <ul className="mt-3 space-y-2 text-sm text-emerald-900/90">
-            <li>• L'application citoyenne fonctionne en <strong>mode anonyme</strong> : aucune inscription, ni email, ni numéro de téléphone n'est demandé.</li>
+            <li>• L'application citoyenne est en <strong>accès libre sans inscription</strong> : votre identité est 100 % protégée par défaut (aucun nom, ni email, ni numéro de téléphone n'est demandé).</li>
             <li>• Les <strong>visages sont automatiquement floutés</strong> sur votre appareil, avant l'envoi de la photo.</li>
             <li>• Les <strong>coordonnées GPS exactes ne sont pas affichées publiquement</strong> ; les visiteurs voient une position arrondie (~ 100 m).</li>
             <li>• Aucune donnée personnelle n'est revendue. SalubApp aide les autorités locales à intervenir efficacement.</li>
@@ -60,7 +60,7 @@ function PrivacyPage() {
             <li><strong>Position GPS</strong> du signalement (latitude / longitude), strictement limitée à la zone du Grand Abidjan.</li>
             <li><strong>Catégorie</strong> et <strong>description</strong> textuelle du problème.</li>
             <li><strong>Quartier / ville</strong> (facultatif, saisi par vous).</li>
-            <li>Un <strong>identifiant technique anonyme</strong> généré par le mode invité, qui ne contient ni nom, ni email, ni téléphone, ni IP. Il sert uniquement à éviter les votes/commentaires en double.</li>
+            <li>Un <strong>jeton technique de sécurité</strong> généré automatiquement en arrière-plan, qui ne contient ni nom, ni email, ni téléphone, ni adresse IP. Il sert uniquement à éviter les votes ou commentaires en double.</li>
             <li><strong>Date et heure</strong> du signalement.</li>
           </ul>
           <p>
@@ -114,7 +114,7 @@ function PrivacyPage() {
           <p>Conformément aux principes de protection des données :</p>
           <ul>
             <li>Vous pouvez à tout moment <strong>supprimer un signalement</strong> que vous avez créé, depuis le fil.</li>
-            <li>Vous pouvez <strong>vous déconnecter</strong> via l'icône en haut à droite ; cela révoque immédiatement votre session anonyme.</li>
+            <li>Aucun compte personnel n'étant créé, vous pouvez à tout moment effacer les données locales de votre navigateur pour réinitialiser votre jeton technique de sécurité.</li>
             <li>Vous pouvez demander la suppression complète d'une donnée publique en nous contactant.</li>
           </ul>
         </Section>

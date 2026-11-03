@@ -1,96 +1,41 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { AppFooter } from "@/components/AppFooter";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { toast } from "sonner";
-import { MapPin, ArrowLeft, UserCircle2, ShieldCheck, Lock } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Mode anonyme — SalubApp" },
-      { name: "description", content: "Signalez en toute confidentialité, sans inscription." },
+      { title: "Accès direct — SalubApp" },
+      { name: "description", content: "Accès libre sans inscription • Identité 100 % protégée." },
     ],
   }),
-  component: LoginPage,
+  component: DirectAccessRedirectPage,
 });
 
-function LoginPage() {
+function DirectAccessRedirectPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
+  const { ensureCitizenSession } = useAuth();
 
   useEffect(() => {
-    if (user) navigate({ to: "/" });
-  }, [user, navigate]);
-
-  const signInAnonymous = async () => {
-    setLoading(true);
-    const { error } = await supabase.auth.signInAnonymously();
-    setLoading(false);
-    if (error) {
-      toast.error("Mode anonyme indisponible", { description: error.message });
-      return;
-    }
-    toast.success("Vous êtes en mode anonyme");
-    navigate({ to: "/" });
-  };
+    let active = true;
+    (async () => {
+      await ensureCitizenSession().catch(() => null);
+      if (active) {
+        navigate({ to: "/signaler", replace: true });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [ensureCitizenSession, navigate]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-secondary/40 to-background">
-      <div className="mx-auto w-full max-w-md flex-1 px-4 py-8">
-        <Link
-          to="/"
-          className="mb-6 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Retour
-        </Link>
-        <div className="mb-6 flex flex-col items-center text-center">
-          <img
-            src="/logo-salubapp.png"
-            alt="Logo SalubApp"
-            className="mb-3 h-16 w-16 rounded-2xl object-cover shadow-lg"
-          />
-          <h1 className="text-2xl font-bold">Signalez en toute confidentialité</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Aucune inscription, aucun email, aucun numéro de téléphone n'est demandé.
-          </p>
-        </div>
-
-        <Card className="space-y-4 p-6 shadow-lg">
-          <Button onClick={signInAnonymous} disabled={loading} className="w-full" size="lg">
-            <UserCircle2 className="mr-2 h-5 w-5" />
-            {loading ? "Connexion…" : "Continuer en mode anonyme"}
-          </Button>
-
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li className="flex items-start gap-2">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-              Vos visages sont automatiquement floutés sur vos photos.
-            </li>
-            <li className="flex items-start gap-2">
-              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-              Aucun nom, email ou téléphone n'est associé à votre signalement.
-            </li>
-            <li className="flex items-start gap-2">
-              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-              Vos coordonnées GPS exactes ne sont jamais affichées publiquement.
-            </li>
-          </ul>
-        </Card>
-
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          En continuant, vous acceptez notre{" "}
-          <Link to="/confidentialite" className="underline hover:text-foreground">
-            politique de confidentialité
-          </Link>
-          .
-        </p>
+    <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">
+      <div className="flex items-center gap-2 text-sm">
+        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+        <span>Ouverture du formulaire de signalement…</span>
       </div>
-      <AppFooter />
     </div>
   );
 }

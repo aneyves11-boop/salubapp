@@ -87,6 +87,7 @@ interface AuthCtx {
   structureProfile: StructureProfile | null;
   setStructureProfile: (profile: StructureProfile | null, userIdOverride?: string) => void;
   setAdminToken: (token: string | null) => void;
+  ensureCitizenSession: () => Promise<User | null>;
   signOut: () => Promise<void>;
   refreshRoles: () => Promise<void>;
 }
@@ -100,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isPartnerVerified, setIsPartnerVerified] = useState(false);
   const [loading, setLoading] = useState(true);
   const hydrateSeqRef = useRef(0);
+  const citizenAuthPromiseRef = useRef<Promise<User | null> | null>(null);
 
   const hydrateUserAccess = async (currentSession: Session | null) => {
     const seq = ++hydrateSeqRef.current;
@@ -243,6 +245,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  const ensureCitizenSession = async (): Promise<User | null> => {
+    if (session?.user) return session.user;
+    if (citizenAuthPromiseRef.current) return citizenAuthPromiseRef.current;
+
+    const promise = (async (): Promise<User | null> => {
+      try {
+        const { data: current } = await supabase.auth.getSession();
+        if (current.session?.user) {
+          setSession(current.session);
+          return current.session.user;
+        }
+        const { data, error } = await supabase.auth.signInAnonymously();
+        if (error || !data.user) {
+          return null;
+        }
+        if (data.session) {
+          setSession(data.session);
+        }
+        return data.user;
+      } catch {
+        return null;
+      } finally {
+        citizenAuthPromiseRef.current = null;
+      }
+    })();
+
+    citizenAuthPromiseRef.current = promise;
+    return promise;
+  };
+
   const hasOfficialAccess =
     Boolean(session?.user) &&
     (roles.includes("autorite") || roles.includes("admin") || isPartnerVerified);
@@ -263,6 +295,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoles((prev) => prev.filter((r) => r !== "admin"));
       }
     },
+    ensureCitizenSession,
     signOut: async () => {
       setStructureProfile(null);
       writeStoredTokenForUser(null, null);
